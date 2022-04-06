@@ -110,29 +110,4 @@ from
         FROM
             circleci.job job
             INNER JOIN original_pr on job.pipeline.vcs.revision = original_pr.pr_head_sha
-        UNION
-            -- Handle Jenkins lol
-        SELECT
-            job.sha as sha,
-            original_pr.master_commit_sha,
-            job.job_name as job_name,
-            -- rocm doesn't have a workflow->job structure per se, so just call the workflow "rocm"
-            'rocm' as workflow_name,
-            job.id as id,
-            CASE
-                WHEN job.status = 'ABORTED' then 'cancelled'
-                ELSE LOWER(job.status)
-            END as conclusion,
-            job.html_url,
-            CONCAT(job.html_url, 'Text') as log_url,
-            -- duration not supported yet
-            null,
-            -- Classifications not yet supported
-            null,
-            null,
-            null,
-            null,
-        FROM
-            jenkins.job job
-            INNER JOIN original_pr on job.sha = original_pr.pr_head_sha
     ) as job

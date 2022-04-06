@@ -1,14 +1,14 @@
 export default function VersionControlLinks({
-  sha,
+  githubUrl,
   diffNum,
 }: {
-  sha: string;
+  githubUrl: string;
   diffNum: string | null;
 }) {
   return (
     <div>
-      <a href={`https://github.com/pytorch/pytorch/commit/${sha}`}>GitHub</a>
-      {diffNum !== undefined ? (
+      <a href={`${githubUrl}`}>GitHub</a>
+      {typeof diffNum === "string" ? (
         <span>
           {" "}
           |{" "}

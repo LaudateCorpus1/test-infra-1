@@ -48,6 +48,21 @@ describe("merge-bot", () => {
     scope.done();
   });
 
+  test("quoted merge/revert command no event", async() => {
+    const merge_event = require("./fixtures/issue_comment.json");
+    merge_event.payload.comment.body = "> @pytorchbot merge this";
+    const revert_event = require("./fixtures/issue_comment.json");
+    revert_event.payload.comment.body = "> @pytorchbot revert this";
+    const scope = nock("https://api.github.com");
+    await probot.receive(merge_event);
+    await probot.receive(revert_event);
+    if (!scope.isDone()) {
+      console.error("pending mocks: %j", scope.pendingMocks());
+    }
+    scope.done();
+  });
+
+
   test("merge this comment on issue triggers confused reaction", async() => {
     const event = require("./fixtures/issue_comment.json");
     event.payload.comment.body = "@pytorchbot merge this";
@@ -65,8 +80,7 @@ describe("merge-bot", () => {
           return true;
         }
       )
-      .reply(200, {})
-      ;
+      .reply(200, {});
 
     await probot.receive(event);
     if (!scope.isDone()) {
@@ -99,14 +113,87 @@ describe("merge-bot", () => {
         `/repos/${owner}/${repo}/dispatches`,
         (body) => {
           expect(JSON.stringify(body)).toContain(
-            `{"event_type":"try-merge","client_payload":{"pr_num":${pr_number}}}`
+            `{"event_type":"try-merge","client_payload":{"pr_num":${pr_number},"comment_id":${comment_number}}}`
+          );
+          return true;
+        }
+      )
+      .reply(200, {});
+
+    await probot.receive(event);
+    if (!scope.isDone()) {
+      console.error("pending mocks: %j", scope.pendingMocks());
+    }
+    scope.done();
+  });
+
+  test("force merge this comment on pull request triggers dispatch and like", async() => {
+    const event = require("./fixtures/pull_request_comment.json");
+
+    event.payload.comment.body = "@pytorchbot    force  merge this";
+
+    const owner = event.payload.repository.owner.login;
+    const repo = event.payload.repository.name;
+    const pr_number = event.payload.issue.number;
+    const comment_number = event.payload.comment.id;
+    const scope = nock("https://api.github.com")
+      .post(
+        `/repos/${owner}/${repo}/issues/comments/${comment_number}/reactions`,
+        (body) => {
+          expect(JSON.stringify(body)).toContain(
+            "{\"content\":\"+1\"}"
           );
           return true;
         }
       )
       .reply(200, {})
-      ;
-      ;
+      .post(
+        `/repos/${owner}/${repo}/dispatches`,
+        (body) => {
+          expect(JSON.stringify(body)).toContain(
+            `{"event_type":"try-merge","client_payload":{"pr_num":${pr_number},"comment_id":${comment_number},"force":true}}`
+          );
+          return true;
+        }
+      )
+      .reply(200, {});
+
+    await probot.receive(event);
+    if (!scope.isDone()) {
+      console.error("pending mocks: %j", scope.pendingMocks());
+    }
+    scope.done();
+  });
+  test("revert this comment on pull request triggers dispatch and like", async() => {
+    const event = require("./fixtures/pull_request_comment.json");
+
+    event.payload.comment.body = "@pytorchbot  revert this";
+
+    const owner = event.payload.repository.owner.login;
+    const repo = event.payload.repository.name;
+    const pr_number = event.payload.issue.number;
+    const comment_number = event.payload.comment.id;
+    const scope = nock("https://api.github.com")
+      .post(
+        `/repos/${owner}/${repo}/issues/comments/${comment_number}/reactions`,
+        (body) => {
+          expect(JSON.stringify(body)).toContain(
+            "{\"content\":\"+1\"}"
+          );
+          return true;
+        }
+      )
+      .reply(200, {})
+      .post(
+        `/repos/${owner}/${repo}/dispatches`,
+        (body) => {
+          expect(JSON.stringify(body)).toContain(
+            `{"event_type":"try-revert","client_payload":{"pr_num":${pr_number},"comment_id":${comment_number}}}`
+          );
+          return true;
+        }
+      )
+      .reply(200, {});
 
     await probot.receive(event);
     if (!scope.isDone()) {
@@ -143,9 +230,7 @@ describe("merge-bot", () => {
           return true;
         }
       )
-      .reply(200, {})
-      ;
-      ;
+      .reply(200, {});
 
     await probot.receive(event);
     if (!scope.isDone()) {

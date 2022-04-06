@@ -28,12 +28,10 @@ export function GroupHudTableColumns({
   names,
   filter,
   groupNameMapping,
-  useGrouping,
 }: {
   names: string[];
   filter: string | null;
   groupNameMapping: Map<string, string[]>;
-  useGrouping: boolean;
 }) {
   return (
     <colgroup>
@@ -41,6 +39,7 @@ export function GroupHudTableColumns({
       <col className={styles.colSha} />
       <col className={styles.colCommit} />
       <col className={styles.colPr} />
+      <col className={styles.colAuthor} />
       {names.map((name: string) => {
         const style = passesGroupFilter(filter, name, groupNameMapping)
           ? {}
@@ -58,14 +57,12 @@ export function GroupHudTableHeader({
   expandedGroups,
   setExpandedGroups,
   groupNameMapping,
-  useGrouping,
 }: {
   names: string[];
   filter: string | null;
   expandedGroups: Set<string>;
   setExpandedGroups: React.Dispatch<React.SetStateAction<Set<string>>>;
   groupNameMapping: Map<string, string[]>;
-  useGrouping: boolean;
 }) {
   const groupNames = new Set(groupNameMapping.keys());
   return (
@@ -75,6 +72,7 @@ export function GroupHudTableHeader({
         <th className={styles.regularHeader}>SHA</th>
         <th className={styles.regularHeader}>Commit</th>
         <th className={styles.regularHeader}>PR</th>
+        <th className={styles.regularHeader}>Author</th>
         {names.map((name) => {
           const isGroup = groupNames.has(name);
           const style = passesGroupFilter(filter, name, groupNameMapping)
