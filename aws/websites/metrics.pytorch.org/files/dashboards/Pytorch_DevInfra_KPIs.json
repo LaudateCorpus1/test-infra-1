@@ -21,7 +21,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 10,
+  "id": 7,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -247,7 +247,7 @@
           "method": "POST",
           "queryParams": "",
           "refId": "A",
-          "urlPath": "/v1/orgs/self/ws/metrics/lambdas/master_commit_red/tags/latest"
+          "urlPath": "/v1/orgs/self/ws/metrics/lambdas/master_commit_red/versions/f5bd7d531d5c8dad"
         }
       ],
       "title": "7d Percent Commits Red on Trunk",

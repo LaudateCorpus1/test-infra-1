@@ -6,9 +6,9 @@ async function readJSON(path) {
   return JSON.parse(rawData);
 }
 
-async function pushProdTag(client, queryName, version) {
-  console.log(`Tagging that commons.${queryName}:${version} as 'prod'`);
-  await client.queryLambdas.createQueryLambdaTag("commons", queryName, {
+async function pushProdTag(client, workspace, queryName, version) {
+  console.log(`Tagging that ${workspace}.${queryName}:${version} as 'prod'`);
+  await client.queryLambdas.createQueryLambdaTag(workspace, queryName, {
     version,
     tag_name: "prod",
   });
@@ -17,8 +17,11 @@ async function pushProdTag(client, queryName, version) {
 const client = rockset.default(process.env.ROCKSET_API_KEY);
 
 const prodVersions = await readJSON("./rockset/prodVersions.json");
-const tasks = Object.entries(prodVersions).map(([queryName, version]) =>
-  pushProdTag(client, queryName, version)
-);
+const tasks = [];
+Object.keys(prodVersions).forEach((workspace) => {
+  Object.entries(prodVersions[workspace]).forEach(([queryName, version]) =>
+    tasks.push(pushProdTag(client, workspace, queryName, version))
+  );
+});
 
 await Promise.all(tasks);

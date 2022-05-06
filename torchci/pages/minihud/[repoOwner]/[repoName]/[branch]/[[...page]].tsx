@@ -1,5 +1,15 @@
-import { GetStaticProps } from "next";
-import { SWRConfig } from "swr";
+import CopyLink from "components/CopyLink";
+import JobConclusion from "components/JobConclusion";
+import JobFilterInput from "components/JobFilterInput";
+import JobLinks from "components/JobLinks";
+import LogViewer from "components/LogViewer";
+import styles from "components/minihud.module.css";
+import PageSelector from "components/PageSelector";
+import { LocalTimeHuman } from "components/TimeUtils";
+import { isFailedJob } from "lib/jobUtils";
+import { HudParams, JobData, packHudParams, RowData } from "lib/types";
+import useHudData from "lib/useHudData";
+import { useRouter } from "next/router";
 import {
   createContext,
   CSSProperties,
@@ -8,18 +18,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { useRouter } from "next/router";
-
-import fetchHud from "lib/fetchHud";
-import { formatHudUrlForFetch, HudParams, JobData, RowData } from "lib/types";
-import styles from "components/minihud.module.css";
-import JobLinks from "components/JobLinks";
-import { LocalTimeHuman } from "components/TimeUtils";
-import JobConclusion from "components/JobConclusion";
-import JobFilterInput from "components/JobFilterInput";
-import useHudData from "lib/useHudData";
-import { isFailedJob } from "lib/jobUtils";
-import LogViewer from "components/LogViewer";
+import { SWRConfig } from "swr";
 
 function includesCaseInsensitive(value: string, pattern: string): boolean {
   if (pattern === "") {
@@ -32,7 +31,6 @@ function FailedJob({ job }: { job: JobData }) {
   const [jobFilter, setJobFilter] = useContext(JobFilterContext);
   const [jobHoverContext, setJobHoverContext] = useContext(JobHoverContext);
   const [highlighted, setHighlighted] = useState(false);
-  const [thisJobHovered, setThisJobHovered] = useState(false);
 
   const router = useRouter();
 
@@ -78,11 +76,9 @@ function FailedJob({ job }: { job: JobData }) {
       className={jobStyle}
       id={job.id}
       onMouseEnter={() => {
-        setThisJobHovered(true);
         setJobHoverContext(job.name!);
       }}
       onMouseLeave={() => {
-        setThisJobHovered(false);
         setJobHoverContext(null);
       }}
     >
@@ -97,11 +93,9 @@ function FailedJob({ job }: { job: JobData }) {
           {" "}
           {job.name}
         </a>
-        {thisJobHovered && (
-          <a href={`#${job.id}`} className={styles.extraShaInfo}>
-            link to this job
-          </a>
-        )}
+        <CopyLink
+          textToCopy={`${location.href.replace(location.hash, "")}#${job.id}`}
+        />
       </div>
       <div className={styles.failedJobLinks}>
         <input
@@ -185,12 +179,10 @@ function CommitLinks({ row }: { row: RowData }) {
 }
 
 function CommitSummaryLine({
-  showAnchorLink,
   row,
   numPending,
   showRevert,
 }: {
-  showAnchorLink: boolean;
   row: RowData;
   numPending: number;
   showRevert: boolean;
@@ -208,8 +200,11 @@ function CommitSummaryLine({
           rel="noreferrer"
           href={`/pytorch/pytorch/commit/${row.sha}`}
         >
-          {row.commitTitle}
+          {row.commitTitle + " "}
         </a>
+        <CopyLink
+          textToCopy={`${location.href.replace(location.hash, "")}#${row.sha}`}
+        />
       </span>
 
       {numPending > 0 && (
@@ -228,11 +223,6 @@ function CommitSummaryLine({
           </a>
         </span>
       )}
-      {showAnchorLink && (
-        <span className={`${styles.shaTitleElement} ${styles.extraShaInfo}`}>
-          <a href={`#${row.sha}`}>link to this commit</a>
-        </span>
-      )}
       <CommitLinks row={row} />
     </div>
   );
@@ -240,7 +230,6 @@ function CommitSummaryLine({
 
 function CommitSummary({ row }: { row: RowData }) {
   const [jobFilter, _setJobFilter] = useContext(JobFilterContext);
-  const [hover, setHover] = useState(false);
   const [highlighted, setHighlighted] = useState(false);
 
   const existingJobs = row.jobs.filter((job) => job.conclusion !== undefined);
@@ -287,30 +276,18 @@ function CommitSummary({ row }: { row: RowData }) {
   }, [row.sha]);
 
   return (
-    <div
-      id={row.sha}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      className={className}
-    >
+    <div id={row.sha} className={className}>
       <CommitSummaryLine
         row={row}
         numPending={pendingJobs.length}
         showRevert={failedJobs.length !== 0}
-        showAnchorLink={hover}
       />
       <FailedJobs failedJobs={failedJobs} />
     </div>
   );
 }
 
-function MiniHud() {
-  const params: HudParams = {
-    branch: "master",
-    repoOwner: "pytorch",
-    repoName: "pytorch",
-    page: 0,
-  };
+function MiniHud({ params }: { params: HudParams }) {
   const data = useHudData(params);
   if (data === undefined) {
     return <div>Loading...</div>;
@@ -335,8 +312,9 @@ const JobHoverContext = createContext<
   [null | string, (name: null | string) => void]
 >([null, (_n) => {}]);
 
-export default function Page({ fallback }: any) {
+export default function Page() {
   const router = useRouter();
+  const params = packHudParams(router.query);
   const [jobFilter, setJobFilter] = useState<string | null>(null);
   const [jobHover, setJobHover] = useState<string | null>(null);
 
@@ -358,7 +336,13 @@ export default function Page({ fallback }: any) {
   }, [router.query.name_filter]);
 
   return (
-    <SWRConfig value={{ fallback }}>
+    <SWRConfig
+      value={{
+        refreshInterval: 60 * 1000,
+        fetcher: (resource, init) =>
+          fetch(resource, init).then((res) => res.json()),
+      }}
+    >
       <JobFilterInput
         width="50%"
         currentFilter={jobFilter}
@@ -369,27 +353,15 @@ export default function Page({ fallback }: any) {
       <JobFilterContext.Provider value={[jobFilter, setJobFilter]}>
         <JobHoverContext.Provider value={[jobHover, setJobHover]}>
           <div style={{ display: "grid" }}>
-            <MiniHud />
+            {params.branch != undefined && (
+              <>
+                <MiniHud params={params} />
+                <PageSelector params={params} baseUrl="minihud" />
+              </>
+            )}
           </div>
         </JobHoverContext.Provider>
       </JobFilterContext.Provider>
     </SWRConfig>
   );
 }
-
-export const getStaticProps: GetStaticProps = async () => {
-  const params: HudParams = {
-    branch: "master",
-    repoOwner: "pytorch",
-    repoName: "pytorch",
-    page: 0,
-  };
-  return {
-    props: {
-      fallback: {
-        [formatHudUrlForFetch("api/hud", params)]: await fetchHud(params),
-      },
-    },
-    revalidate: 60,
-  };
-};
