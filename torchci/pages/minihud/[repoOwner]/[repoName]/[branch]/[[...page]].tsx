@@ -1,4 +1,5 @@
 import CopyLink from "components/CopyLink";
+import JobAnnotationToggle from "components/JobAnnotationToggle";
 import JobConclusion from "components/JobConclusion";
 import JobFilterInput from "components/JobFilterInput";
 import JobLinks from "components/JobLinks";
@@ -9,6 +10,7 @@ import { LocalTimeHuman } from "components/TimeUtils";
 import { isFailedJob } from "lib/jobUtils";
 import { HudParams, JobData, packHudParams, RowData } from "lib/types";
 import useHudData from "lib/useHudData";
+import useScrollTo from "lib/useScrollTo";
 import { useRouter } from "next/router";
 import {
   createContext,
@@ -107,6 +109,9 @@ function FailedJob({ job }: { job: JobData }) {
         <label htmlFor="setfilterbox">Set filter | </label>
         <JobLinks job={job} />
       </div>
+      <div>
+        <JobAnnotationToggle job={job} />
+      </div>
       <LogViewer job={job} />
     </div>
   );
@@ -187,6 +192,9 @@ function CommitSummaryLine({
   numPending: number;
   showRevert: boolean;
 }) {
+  const router = useRouter();
+  useScrollTo();
+
   return (
     <div>
       <span className={`${styles.shaTitleElement} ${styles.timestamp}`}>
@@ -274,7 +282,7 @@ function CommitSummary({ row }: { row: RowData }) {
       window.removeEventListener("hashchange", onHashChanged);
     };
   }, [row.sha]);
-
+  useScrollTo();
   return (
     <div id={row.sha} className={className}>
       <CommitSummaryLine

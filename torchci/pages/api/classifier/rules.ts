@@ -29,6 +29,11 @@ export default async function handler(
     .setHeader("Cache-Control", "s-maxage=60")
     .json([
       {
+        name: "Operator backwards compatibility",
+        pattern: r`^The PR is introducing backward incompatible changes to the operator library.`,
+        priority: 1006,
+      },
+      {
         name: "Lintrunner failure",
         pattern: r`^>>> Lint for.*`,
         priority: 1005,
@@ -161,7 +166,7 @@ export default async function handler(
       },
       {
         name: "ASAN failure",
-        pattern: r`^AddressSanitizer:DEADLYSIGNAL`,
+        pattern: r`^ERROR: AddressSanitizer`,
         priority: 699,
       },
       {
@@ -177,6 +182,16 @@ export default async function handler(
       {
         name: "CUDA out of memory error",
         pattern: r`^RuntimeError: CUDA out of memory.`,
+        priority: 100,
+      },
+      {
+        name: "Python Test File RuntimeError",
+        pattern: r`^RuntimeError: test.* failed`,
+        priority: 100,
+      },
+      {
+        name: "Python flaky unittest",
+        pattern: r`^\s*(test.*) (fail|error|succeed)?ed - num_retries_left:`,
         priority: 100,
       },
       {
@@ -206,7 +221,7 @@ export default async function handler(
       },
       {
         name: "GHA error",
-        pattern: r`^##\[error\]`,
+        pattern: r`^##\[error\](.*)`,
         priority: 94,
       },
     ]);

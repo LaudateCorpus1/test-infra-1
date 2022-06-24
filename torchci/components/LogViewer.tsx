@@ -18,6 +18,7 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import _ from "lodash";
 import { isFailure } from "lib/JobClassifierUtil";
 
+const ESC_CHAR_REGEX = /\x1b\[[0-9;]*m/g;
 // Based on the current editor view, produce a series of decorations that
 // correctly colorize the ANSI escape codes found in the view.
 function computeDecorations(view: EditorView) {
@@ -63,7 +64,7 @@ function computeDecorations(view: EditorView) {
         }
 
         // Also hide all the weird escape characters.
-        for (const match of lineText.matchAll(/\x1b\[[0-9;]*m/g)) {
+        for (const match of lineText.matchAll(ESC_CHAR_REGEX)) {
           const startWithinLine = match.index;
           const decoFrom = pos + startWithinLine!;
           const decoTo = decoFrom + match[0].length;
@@ -96,7 +97,7 @@ const foldUninteresting = foldService.of(
     // the document.
     if (
       startingLine.text.includes(".github/actions/teardown") ||
-      startingLine.text.includes("github/actions/get-workflow-job-id")
+      startingLine.text.includes("Post job cleanup.")
     ) {
       return { from: lineStart, to: state.doc.length };
     }
@@ -188,6 +189,18 @@ function Log({ url, line }: { url: string; line: number | null }) {
 
 export default function LogViewer({ job }: { job: JobData }) {
   const [showLogViewer, setShowLogViewer] = useState(false);
+
+  useEffect(() => {
+    document.addEventListener("copy", (e) => {
+      const selection = document.getSelection();
+      e.clipboardData?.setData(
+        "text/plain",
+        (selection?.toString() ?? "").replaceAll(ESC_CHAR_REGEX, "")
+      );
+      e.preventDefault();
+    });
+  });
+
   if (!isFailure(job.conclusion)) {
     return null;
   }

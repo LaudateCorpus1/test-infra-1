@@ -24,13 +24,15 @@ WITH job as (
         classification.line_num as failure_line_number,
     FROM
         workflow_job job
-        JOIN workflow_run workflow on workflow.id = job.run_id
-        LEFT JOIN "GitHub-Actions".classification ON classification.job_id = job.id
+        INNER JOIN workflow_run workflow on workflow.id = job.run_id HINT(join_strategy = lookup)
+        LEFT JOIN "GitHub-Actions".classification ON classification.job_id = job.id HINT(join_strategy = lookup)
     WHERE
         job.name != 'ciflow_should_run'
         AND job.name != 'generate-test-matrix'
-        AND workflow.event != 'workflow_run' -- Filter out worflow_run-triggered jobs, which have nothing to do with the SHA
+        AND workflow.event != 'workflow_run' -- Filter out workflow_run-triggered jobs, which have nothing to do with the SHA
+        AND workflow.event != 'repository_dispatch' -- Filter out repository_dispatch-triggered jobs, which have nothing to do with the SHA
         AND workflow.head_commit.id = :sha
+        AND workflow.repository.full_name = :repo
     UNION
         -- Handle CircleCI
         -- IMPORTANT: this needs to have the same order as the query above
@@ -73,6 +75,7 @@ WITH job as (
         circleci.job job
     WHERE
         job.pipeline.vcs.revision = :sha
+        AND CONCAT(job.organization.name, "/", job.project.name) = :repo
 )
 SELECT
     sha,

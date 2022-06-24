@@ -28,25 +28,8 @@ import { RocksetParam } from "lib/rockset";
 import { fetcher } from "lib/GeneralUtils";
 import ScalarPanel from "components/metrics/panels/ScalarPanel";
 import TablePanel from "components/metrics/panels/TablePanel";
-
-// Given a number of seconds, convert it to the biggest possible unit of
-// measurement and display with a scale of 1.
-// e.g. 5400 -> "1.5h"
-function durationDisplay(seconds: number): string {
-  if (seconds < 60) {
-    return seconds + "s";
-  }
-  const minutes = seconds / 60.0;
-  if (minutes < 60) {
-    return minutes.toFixed(1) + "m";
-  }
-  const hours = minutes / 60.0;
-  if (hours < 24) {
-    return hours.toFixed(1) + "h";
-  }
-  const days = hours / 24.0;
-  return days.toFixed(1) + "d";
-}
+import TimeSeriesPanel from "components/metrics/panels/TimeSeriesPanel";
+import { durationDisplay } from "components/TimeUtils";
 
 function MasterJobsRedPanel({ params }: { params: RocksetParam[] }) {
   const url = `/api/query/metrics/master_jobs_red?parameters=${encodeURIComponent(
@@ -235,7 +218,7 @@ function TimePicker({ label, value, setValue }: any) {
 /**
  * Allows the user to pick from common time ranges, or manually set their own.
  */
-function TimeRangePicker({
+export function TimeRangePicker({
   startTime,
   stopTime,
   setStartTime,
@@ -392,17 +375,11 @@ export default function Page() {
         <Grid container item xs={2} justifyContent={"stretch"}>
           <Stack justifyContent={"space-between"} flexGrow={1}>
             <ScalarPanel
-              title={"Last viable/strict push"}
-              queryName={"last_branch_push"}
-              metricName={"push_seconds_ago"}
+              title={"viable/strict lag"}
+              queryName={"strict_lag_sec"}
+              metricName={"strict_lag_sec"}
               valueRenderer={(value) => durationDisplay(value)}
-              queryParams={[
-                {
-                  name: "branch",
-                  type: "string",
-                  value: "refs/heads/viable/strict",
-                },
-              ]}
+              queryParams={[]}
               badThreshold={(value) => value > 60 * 60 * 6} // 6 hours
             />
             <ScalarPanel
@@ -510,14 +487,14 @@ export default function Page() {
               { field: "count", headerName: "Count", flex: 1 },
               {
                 field: "avg_queue_s",
-                headerName: "Avg queue time",
+                headerName: "Queue time",
                 flex: 1,
                 valueFormatter: (params: GridValueFormatterParams<number>) =>
                   durationDisplay(params.value),
               },
-              { field: "labels", headerName: "Machine Type", flex: 4 },
+              { field: "machine_type", headerName: "Machine Type", flex: 4 },
             ]}
-            dataGridProps={{ getRowId: (el: any) => el.labels[0] }}
+            dataGridProps={{ getRowId: (el: any) => el.machine_type }}
           />
         </Grid>
 
@@ -534,7 +511,7 @@ export default function Page() {
                 valueFormatter: (params: GridValueFormatterParams<number>) =>
                   durationDisplay(params.value),
               },
-              { field: "labels", headerName: "Machine Type", flex: 1 },
+              { field: "machine_type", headerName: "Machine Type", flex: 1 },
               {
                 field: "name",
                 headerName: "Job Name",
@@ -552,6 +529,46 @@ export default function Page() {
               },
               getRowId: (el: any) => el.html_url,
             }}
+          />
+        </Grid>
+
+        <Grid item xs={6} height={ROW_HEIGHT}>
+          <TimeSeriesPanel
+            title={"Queue times historical"}
+            queryName={"queue_times_historical"}
+            queryParams={[
+              {
+                name: "timezone",
+                type: "string",
+                value: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              },
+              ...timeParams,
+            ]}
+            granularity={"hour"}
+            groupByFieldName={"machine_type"}
+            timeFieldName={"granularity_bucket"}
+            yAxisFieldName={"avg_queue_s"}
+            yAxisRenderer={durationDisplay}
+          />
+        </Grid>
+
+        <Grid item xs={6} height={ROW_HEIGHT}>
+          <TimeSeriesPanel
+            title={"Workflow load"}
+            queryName={"workflow_load"}
+            queryParams={[
+              {
+                name: "timezone",
+                type: "string",
+                value: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              },
+              ...timeParams,
+            ]}
+            granularity={"hour"}
+            groupByFieldName={"name"}
+            timeFieldName={"granularity_bucket"}
+            yAxisFieldName={"count"}
+            yAxisRenderer={(value) => value}
           />
         </Grid>
 

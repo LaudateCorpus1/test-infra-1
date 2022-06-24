@@ -48,9 +48,7 @@ async function syncTag(
     context.log.info(
       `deleting out of date tag ${tag} on sha ${match.object.sha}`
     );
-    await context.octokit.git.deleteRef(
-      context.repo({ ref: `tags/${tag}` })
-    );
+    await context.octokit.git.deleteRef(context.repo({ ref: `tags/${tag}` }));
   }
 
   context.log.info(`Creating tag ${tag} on head sha ${headSha}`);
@@ -74,9 +72,7 @@ async function rmTag(
   for (const match of matchingTags.data) {
     if (match.ref === `refs/tags/${tag}`) {
       context.log.info(`Deleting tag ${tag} on sha ${match.object.sha}`);
-      await context.octokit.git.deleteRef(
-        context.repo({ ref: `tags/${tag}` })
-      );
+      await context.octokit.git.deleteRef(context.repo({ ref: `tags/${tag}` }));
       return;
     }
   }
@@ -141,7 +137,6 @@ async function handleLabelEvent(context: Context<"pull_request.labeled">) {
   const valid_labels = [
     "ciflow/trunk",
     "ciflow/periodic",
-    "ciflow/all",
     "ciflow/android",
     "ciflow/binaries",
     "ciflow/nightly",
@@ -150,14 +145,22 @@ async function handleLabelEvent(context: Context<"pull_request.labeled">) {
     "ciflow/binaries_wheel",
   ];
   if (!valid_labels.includes(label)) {
-    let body = `We have recently simplified the CIFlow labels and \`${label}\` is no longer in use.\n`;
+    let body;
+    if (label === "ciflow/all") {
+      body =
+        "The `ciflow/all` label was recently removed. It ran very expensive periodic CI jobs when most contributors ";
+      body +=
+        "did not need them. If you just want to check that you won't be reverted, use `ciflow/trunk`. ";
+      body +=
+        "If you *really* want the old `ciflow/all` behavior, add `ciflow/trunk` and `ciflow/periodic`.";
+    } else {
+      body = `We have recently simplified the CIFlow labels and \`${label}\` is no longer in use.\n`;
+    }
     body += "You can use any of the following\n";
     body +=
       "- `ciflow/trunk` (`.github/workflows/trunk.yml`): all jobs we run per-commit on master\n";
     body +=
       "- `ciflow/periodic` (`.github/workflows/periodic.yml`): all jobs we run periodically on master\n";
-    body +=
-      "- `ciflow/all`: trunk + periodic; all jobs we run in master CI\n";
     body +=
       "- `ciflow/android` (`.github/workflows/run_android_tests.yml`): android build and test\n";
     body +=
@@ -167,8 +170,7 @@ async function handleLabelEvent(context: Context<"pull_request.labeled">) {
       " - `ciflow/binaries_conda`: binary build and upload job for conda\n";
     body +=
       " - `ciflow/binaries_libtorch`: binary build and upload job for libtorch\n";
-    body +=
-      " - `ciflow/binaries_wheel`: binary build and upload job for wheel";
+    body += " - `ciflow/binaries_wheel`: binary build and upload job for wheel";
     await context.octokit.issues.createComment(
       context.repo({
         body,

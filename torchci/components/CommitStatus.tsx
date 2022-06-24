@@ -5,6 +5,7 @@ import WorkflowBox from "./WorkflowBox";
 import styles from "components/commit.module.css";
 import _ from "lodash";
 import { isFailedJob } from "lib/jobUtils";
+import { linkIt, UrlComponent, urlRegex } from "react-linkify-it";
 
 function WorkflowsContainer({ jobs }: { jobs: JobData[] }) {
   const byWorkflow = _.groupBy(jobs, (job) => job.workflowName);
@@ -38,10 +39,19 @@ export default function CommitStatus({
 }) {
   return (
     <>
-      <VersionControlLinks githubUrl={commit.commitUrl} diffNum={commit.diffNum} />
+      <VersionControlLinks
+        githubUrl={commit.commitUrl}
+        diffNum={commit.diffNum}
+      />
 
       <article className={styles.commitMessage}>
-        {commit.commitMessageBody}
+        {linkIt(
+          commit.commitMessageBody,
+          (match, key) => (
+            <UrlComponent match={match} key={key} />
+          ),
+          urlRegex
+        )}
       </article>
       <FilteredJobList
         filterName="Failed jobs"
