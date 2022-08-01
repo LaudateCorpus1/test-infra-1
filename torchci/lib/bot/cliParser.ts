@@ -44,12 +44,14 @@ mergeOption.add_argument("-g", "--green", {
   help: "Merge when *all* status checks pass.",
 });
 mergeOption.add_argument("-f", "--force", {
-  action: "store_true",
-  help: "Merge without checking anything. ONLY USE THIS FOR CRITICAL FAILURES.",
+  help:
+    "Merge without checking anything. This requires a reason for auditting purpose, for example:\n" +
+    "`@pytorchbot merge -f '[MINOR] Fix lint. Expecting all PR tests to pass'`\n" +
+    "The reason must be longer than 2 words. ONLY USE THIS FOR CRITICAL FAILURES.",
 });
 mergeOption.add_argument("-l", "--land-checks", {
   action: "store_true",
-  help: "Merge with land time checks. (EXPERIMENTAL! DO NOT USE)",
+  help: "Merge with land time checks. This will create a new branch with your changes rebased on viable/strict and run additional tests (EXPERIMENTAL)",
 });
 
 // Revert
@@ -91,12 +93,35 @@ branch_selection.add_argument("-b", "--branch", {
   help: "Branch you would like to rebase to",
 });
 
+const label = commands.add_parser("label", {
+  help: "Add label to a PR",
+  description: "Adds label to a PR",
+  formatter_class: RawTextHelpFormatter,
+  add_help: false,
+});
+label.add_argument("labels", {
+  type: "string",
+  nargs: "+",
+  help: "Labels to add to given Pull Request",
+});
+
 // Help
 parser.add_argument("-h", "--help", {
   default: SUPPRESS,
   help: "Show this help message and exit.",
   action: "store_true",
 });
+
+const botCommandPattern = new RegExp(/^@pytorch(merge|)bot.*$/m);
+
+export function getInputArgs(commentBody: string): string {
+  const match = commentBody.match(botCommandPattern);
+  if (!match) {
+    return "";
+  }
+
+  return match[0].replace(/@pytorch(merge|)bot/, "");
+}
 
 export function getParser() {
   return parser;
@@ -116,5 +141,8 @@ ${revert.format_help()}\`\`\`
 ## Rebase
 \`\`\`
 ${rebase.format_help()}\`\`\`
+## Label
+\`\`\`
+${label.format_help()}\`\`\`
 `;
 }

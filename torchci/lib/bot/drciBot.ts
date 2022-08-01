@@ -1,75 +1,71 @@
 import { Context, Probot } from "probot";
-
-const drciCommentStart = "<!-- drci-comment-start -->";
-const drciCommentEnd = "<!-- drci-comment-end -->";
-const possibleUsers = ["swang392"]
+import { DRCI_COMMENT_START, OWNER, REPO, formDrciComment } from "lib/drciUtils";
+import { POSSIBLE_USERS } from "lib/bot/rolloutUtils";
 
 async function getDrciComment(
   context: Context,
   prNum: number,
-  owner: string,
-  repo: string
-): Promise<[number, string]> {
+): Promise<{ id: number; body: string }> {
   const commentsRes = await context.octokit.issues.listComments({
-    owner,
-    repo,
+    owner: OWNER,
+    repo: REPO,
     issue_number: prNum,
   });
   for (const comment of commentsRes.data) {
-    if (comment.body!.includes(drciCommentStart)) {
-      return [comment.id, comment.body!];
+    if (comment.body!.includes(DRCI_COMMENT_START)) {
+      return { id: comment.id, body: comment.body! };
     }
   }
-  return [0, ""];
-}
-
-export function formDrciComment(): string {
-  let body = "hello there!"
-  return drciCommentStart + body + drciCommentEnd;
+  return { id: 0, body: "" };
 }
 
 export default function drciBot(app: Probot): void {
-  app.on(["pull_request.opened", "pull_request.synchronize"], async (context) => {
-    const prNum = context.payload.pull_request.number;
-    const pr_owner = context.payload.pull_request.user.login;
-    const repo = context.payload.repository.name;
-    const owner = context.payload.repository.owner.login;
-    
-    console.log(pr_owner);
-    if (pr_owner in possibleUsers) {
-      const existingValidationCommentData = await getDrciComment(
-        context,
-        prNum,
-        owner,
-        repo
-      );
-      const existingValidationCommentID = existingValidationCommentData[0];
-      const existingValidationComment = existingValidationCommentData[1];
-  
-      const drciComment = formDrciComment();
-  
-      if (existingValidationComment === drciComment) {
+  app.on(
+    ["pull_request.opened", "pull_request.synchronize"],
+    async (context) => {
+      const prNum = context.payload.pull_request.number;
+      const pr_owner = context.payload.pull_request.user.login;
+
+      context.log(pr_owner);
+
+      if (!POSSIBLE_USERS.includes(pr_owner)) {
+        context.log("did not make a comment");
         return;
       }
-  
-      if (existingValidationCommentID === 0) {
+
+      const existingDrciData = await getDrciComment(
+        context,
+        prNum,
+      );
+      const existingDrciID = existingDrciData.id;
+      const existingDrciComment = existingDrciData.body;
+      const drciComment = formDrciComment(prNum);
+
+      if (existingDrciComment === drciComment) {
+        return;
+      }
+
+      if (existingDrciID === 0) {
         await context.octokit.issues.createComment({
           body: drciComment,
-          owner,
-          repo,
+          owner: OWNER,
+          repo: REPO,
           issue_number: prNum,
         });
+        context.log(
+          `Commenting with "${drciComment}" for pull request ${context.payload.pull_request.html_url}`
+        );
       } else {
         await context.octokit.issues.updateComment({
           body: drciComment,
-          owner,
-          repo,
-          comment_id: existingValidationCommentID,
+          owner: OWNER,
+          repo: REPO,
+          comment_id: existingDrciID,
         });
+        context.log(
+          `Updated comment with "${drciComment}" for pull request ${context.payload.pull_request.html_url}`
+        );
       }
     }
-    else {
-      console.log("did not make a comment")
-    }
-  });
+  );
 }

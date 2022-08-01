@@ -1,7 +1,12 @@
 import { Probot } from "probot";
 import * as utils from "./utils";
 import nock from "nock";
-import myProbotApp, * as botUtils from "../lib/bot/drciBot";
+import myProbotApp from "../lib/bot/drciBot";
+import * as drciUtils from "lib/drciUtils";
+import { OWNER, REPO } from "lib/drciUtils";
+
+const comment_id = 10;
+const comment_node_id = "abcd";
 
 describe("verify-drci-functionality", () => {
   let probot: Probot;
@@ -15,24 +20,41 @@ describe("verify-drci-functionality", () => {
     nock.cleanAll();
     jest.restoreAllMocks();
   });
-  
-  test("Dr. CI comment if user of PR is swang392", async () => {
+
+  test("Dr. CI comments if user of PR is swang392", async () => {
     nock("https://api.github.com")
       .post("/app/installations/2/access_tokens")
       .reply(200, { token: "test" });
 
     const payload = require("./fixtures/pull_request.opened")["payload"];
-    payload["pull_request"]["user"]["login"] = "swang392"
+    payload["pull_request"]["user"]["login"] = "swang392";
+    payload["repository"]["owner"]["login"] = OWNER;
+    payload["repository"]["name"] = REPO;
 
     const scope = nock("https://api.github.com")
-      .get("/repos/zhouzhuojie/gha-ci-playground/issues/31/comments", (body) => {
-        return true;
-      })
+      .get(
+        `/repos/${OWNER}/${REPO}/issues/31/comments`,
+        (body) => {
+          return true;
+        }
+      )
       .reply(200)
-      .post("/repos/zhouzhuojie/gha-ci-playground/issues/31/comments", (body) => {
-        expect(body).toMatchObject({ body: "<!-- drci-comment-start -->hello there!<!-- drci-comment-end -->" });
-        return true;
-      })
+      .post(
+        `/repos/${OWNER}/${REPO}/issues/31/comments`,
+        (body) => {
+          const comment = body.body;
+          expect(comment.includes(drciUtils.DRCI_COMMENT_START)).toBeTruthy();
+          expect(
+            comment.includes("See artifacts and rendered test results")
+          ).toBeTruthy();
+          expect(
+            comment.includes("Need help or want to give feedback on the CI?")
+          ).toBeTruthy();
+          expect(comment.includes(drciUtils.OH_URL)).toBeTruthy();
+          expect(comment.includes(drciUtils.DOCS_URL)).toBeTruthy();
+          return true;
+        }
+      )
       .reply(200);
 
     await probot.receive({ name: "pull_request", payload: payload, id: "2" });
@@ -44,13 +66,60 @@ describe("verify-drci-functionality", () => {
 
   test("Dr. CI does not comment when user of PR is swang392", async () => {
     const payload = require("./fixtures/pull_request.opened")["payload"];
-    payload["pull_request"]["user"]["login"] = "not_swang392"
+    payload["pull_request"]["user"]["login"] = "not_swang392";
 
-    const mock = jest.spyOn(botUtils, 'formDrciComment')
+    const mock = jest.spyOn(drciUtils, "formDrciHeader");
     mock.mockImplementation();
 
     await probot.receive({ name: "pull_request", payload: payload, id: "2" });
     expect(mock).not.toHaveBeenCalled();
   });
 
+  test("Dr. CI edits existing comment if a comment is already present", async () => {
+    nock("https://api.github.com")
+      .post("/app/installations/2/access_tokens")
+      .reply(200, { token: "test" });
+
+    const payload = require("./fixtures/pull_request.opened")["payload"];
+    payload["pull_request"]["user"]["login"] = "swang392";
+    payload["repository"]["owner"]["login"] = OWNER;
+    payload["repository"]["name"] = REPO;
+
+    const scope = nock("https://api.github.com")
+      .get(
+        `/repos/${OWNER}/${REPO}/issues/31/comments`,
+        (body) => {
+          return true;
+        }
+      )
+      .reply(200, [
+        {
+          id: comment_id,
+          node_id: comment_node_id,
+          body: "<!-- drci-comment-start -->\nhello\n<!-- drci-comment-end -->\n",
+        },
+      ])
+      .patch(
+        `/repos/${OWNER}/${REPO}/issues/comments/${comment_id}`,
+        (body) => {
+          const comment = body.body;
+          expect(comment.includes(drciUtils.DRCI_COMMENT_START)).toBeTruthy();
+          expect(
+            comment.includes("See artifacts and rendered test results")
+          ).toBeTruthy();
+          expect(
+            comment.includes("Need help or want to give feedback on the CI?")
+          ).toBeTruthy();
+          expect(comment.includes(drciUtils.OH_URL)).toBeTruthy();
+          expect(comment.includes(drciUtils.DOCS_URL)).toBeTruthy();
+          return true;
+        }
+      )
+      .reply(200);
+    await probot.receive({ name: "pull_request", payload: payload, id: "2" });
+
+    if (!nock.isDone()) {
+      console.error("pending mocks: %j", scope.pendingMocks());
+    }
+  });
 });

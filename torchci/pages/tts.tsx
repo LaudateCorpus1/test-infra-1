@@ -19,12 +19,13 @@ import { useState } from "react";
 import { RocksetParam } from "lib/rockset";
 import { fetcher } from "lib/GeneralUtils";
 import {
+  Granularity,
   getTooltipMarker,
   seriesWithInterpolatedTimes,
 } from "components/metrics/panels/TimeSeriesPanel";
 import { durationDisplay } from "components/TimeUtils";
 import React from "react";
-import { TimeRangePicker } from "./metrics";
+import { TimeRangePicker, TtsPercentilePicker } from "./metrics";
 
 function Panel({
   series,
@@ -75,6 +76,8 @@ function Panel({
 
 function getSeries(
   data: any,
+  startTime: dayjs.Dayjs,
+  stopTime: dayjs.Dayjs,
   granularity: any,
   groupByFieldName: string,
   timeFieldName: string,
@@ -103,6 +106,8 @@ function getSeries(
   } else {
     return seriesWithInterpolatedTimes(
       data,
+      startTime,
+      stopTime,
       granularity,
       groupByFieldName,
       timeFieldName,
@@ -114,16 +119,30 @@ function getSeries(
 function Graphs({
   queryParams,
   granularity,
+  ttsPercentile,
 }: {
   queryParams: RocksetParam[];
-  granularity: string;
+  granularity: "hour" | "day" | "week" | "month" | "year";
+  ttsPercentile: number;
 }) {
   const [filter, setFilter] = useState(new Set());
   const ROW_HEIGHT = 800;
 
+  let queryName = "tts_duration_historical_percentile";
+  let ttsFieldName = "tts_percentile_sec";
+  let durationFieldName = "duration_percentile_sec";
+
+  // -1 is the special case in which we will use avg instead
+  if (ttsPercentile === -1) {
+    queryName = "tts_duration_historical";
+    ttsFieldName = "tts_avg_sec";
+    durationFieldName = "duration_avg_sec";
+  }
+
+
   const timeFieldName = "granularity_bucket";
   const groupByFieldName = "full_name";
-  const url = `/api/query/metrics/tts_duration_historical?parameters=${encodeURIComponent(
+  const url = `/api/query/metrics/${queryName}?parameters=${encodeURIComponent(
     JSON.stringify(queryParams)
   )}`;
 
@@ -156,20 +175,31 @@ function Graphs({
     }
     setFilter(next);
   }
+  let startTime = queryParams.find((p) => p.name === "startTime")?.value;
+  let stopTime = queryParams.find((p) => p.name === "stopTime")?.value;
+
+  // Clamp to the nearest granularity (e.g. nearest hour) so that the times will
+  // align with the data we get from Rockset
+  startTime = dayjs(startTime).startOf(granularity);
+  stopTime = dayjs(stopTime).endOf(granularity);
 
   const tts_true_series = getSeries(
     data,
+    startTime,
+    stopTime,
     granularity,
     groupByFieldName,
     timeFieldName,
-    "tts_avg_sec"
+    ttsFieldName,
   );
   const duration_true_series = getSeries(
     data,
+    startTime,
+    stopTime,
     granularity,
     groupByFieldName,
     timeFieldName,
-    "duration_avg_sec"
+    durationFieldName,
   );
   var tts_series = tts_true_series.filter((item: any) =>
     filter.has(item["name"])
@@ -238,7 +268,8 @@ function GranularityPicker({
 export default function Page() {
   const [startTime, setStartTime] = useState(dayjs().subtract(1, "week"));
   const [stopTime, setStopTime] = useState(dayjs());
-  const [granularity, setGranularity] = useState("day");
+  const [granularity, setGranularity] = useState<Granularity>("day");
+  const [ttsPercentile, setTtsPercentile] = useState<number>(0.50);
 
   const queryParams: RocksetParam[] = [
     {
@@ -249,6 +280,8 @@ export default function Page() {
     { name: "startTime", type: "string", value: startTime },
     { name: "stopTime", type: "string", value: stopTime },
     { name: "granularity", type: "string", value: granularity },
+    { name: "percentile", type: "float", value: ttsPercentile },
+    { name: "branch", type: "string", value: "master" },
   ];
 
   return (
@@ -267,8 +300,16 @@ export default function Page() {
           granularity={granularity}
           setGranularity={setGranularity}
         />
+        <TtsPercentilePicker
+          ttsPercentile={ttsPercentile}
+          setTtsPercentile={setTtsPercentile}
+        />
       </Stack>
-      <Graphs queryParams={queryParams} granularity={granularity} />
+      <Graphs
+        queryParams={queryParams}
+        granularity={granularity}
+        ttsPercentile={ttsPercentile}
+      />
     </div>
   );
 }
