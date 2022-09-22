@@ -51,13 +51,18 @@ def get_conda_cuda_variables(platform: str, gpu_arch_version: str) -> List[str]:
         conda_build_variant = "cuda"
         cmake_use_cuda = "1"
         if float(sanitized_version) >= 11.6:
-            conda_cuda_toolkit_constraint = f"cuda={sanitized_version}"
+            conda_cuda_toolkit_constraint = f"- pytorch-cuda={sanitized_version} # [not osx]"
+        elif float(sanitized_version) == 11.3:
+            conda_cuda_toolkit_constraint = "- cudatoolkit >=11.3,<11.4 # [not osx]"
+        elif float(sanitized_version) == 10.2:
+            conda_cuda_toolkit_constraint = "- cudatoolkit >=10.2,<10.3 # [not osx]"
         else:
             conda_cuda_toolkit_constraint = f"cudatoolkit={sanitized_version}"
     return [
         f"export CONDA_BUILD_VARIANT='{conda_build_variant}'",
         f"export CMAKE_USE_CUDA='{cmake_use_cuda}'",
         f"export CONDA_CUDATOOLKIT_CONSTRAINT='{conda_cuda_toolkit_constraint}'",
+        f"export CUDATOOLKIT_CHANNEL=nvidia",
     ]
 
 

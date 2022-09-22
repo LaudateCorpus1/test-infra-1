@@ -1,4 +1,5 @@
 import { ArgumentParser, RawTextHelpFormatter, SUPPRESS } from "argparse";
+import { revertClassifications } from "./Constants";
 
 // The default ArgumentParser is designed to be used from the command line, so
 // when it encounters an error it calls process.exit. We want to throw an
@@ -34,27 +35,33 @@ const merge = commands.add_parser("merge", {
   help: "Merge a PR",
   description:
     "Merge an accepted PR, subject to the rules in .github/merge_rules.json.\n" +
-    "By default, this will wait for all required checks to succeed before merging.",
+    "By default, this will wait for all required checks (lint, pull) to succeed before merging.",
   formatter_class: RawTextHelpFormatter,
   add_help: false,
 });
 const mergeOption = merge.add_mutually_exclusive_group();
 mergeOption.add_argument("-g", "--green", {
   action: "store_true",
-  help: "Merge when *all* status checks pass.",
+  help: "Merge when all status checks running on the PR pass. To add status checks, use labels like `ciflow/trunk`.",
 });
 mergeOption.add_argument("-f", "--force", {
   metavar: "MESSAGE",
-  help:
-`Merge without checking anything. This requires a reason for auditting purpose, for example:
-@pytorchbot merge -f 'Minor update to fix lint. Expecting all PR tests to pass'`
+  help: `Merge without checking anything. This requires a reason for auditting purpose, for example:
+@pytorchbot merge -f 'Minor update to fix lint. Expecting all PR tests to pass'`,
 });
 mergeOption.add_argument("-l", "--land-checks", {
   action: "store_true",
-  help: "Merge with land time checks. This will create a new branch with your changes rebased " +
-  "on viable/strict and run a majority of trunk tests _before_ landing to increase trunk " +
-  "reliability and decrease risk of revert. The tests added are: pull, Lint and trunk. Note " +
-  "that periodic is excluded. (EXPERIMENTAL)",
+  help:
+    "Merge with land time checks. This will create a new branch with your changes rebased " +
+    "on viable/strict and run a majority of trunk tests _before_ landing to increase trunk " +
+    "reliability and decrease risk of revert. The tests added are: pull, Lint and trunk. Note " +
+    "that periodic is excluded. (EXPERIMENTAL)",
+});
+mergeOption.add_argument("-r", "--rebase", {
+  help: "Rebase the PR to re run checks before merging.  It will accept a branch name and " +
+  "will default to master if not specified.",
+  nargs: "?",
+  const: true
 });
 
 // Revert
@@ -74,7 +81,7 @@ revert.add_argument("-m", "--message", {
 });
 revert.add_argument("-c", "--classification", {
   required: true,
-  choices: ["nosignal", "ignoredsignal", "landrace", "weird", "ghfirst"],
+  choices: Object.keys(revertClassifications),
   help: "A machine-friendly classification of the revert reason.",
 });
 

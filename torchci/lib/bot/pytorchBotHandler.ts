@@ -1,7 +1,21 @@
+import _ from "lodash";
 import shlex from "shlex";
 import { addLabels, reactOnComment } from "./botUtils";
 import { getHelp, getParser } from "./cliParser";
+import PytorchBotLogger from "./pytorchbotLogger";
 import { isInLandCheckAllowlist } from "./rolloutUtils";
+
+export interface PytorchbotParams {
+  owner: string;
+  repo: string;
+  prNum: number;
+  ctx: any;
+  url: string;
+  login: string;
+  commentId: number;
+  commentBody: string;
+  useReactions: boolean;
+}
 
 class PytorchBotHandler {
   ctx: any;
@@ -12,30 +26,24 @@ class PytorchBotHandler {
   url: string;
   commentId: number;
   login: string;
+  commentBody: string;
 
-  mergeCmdPat = new RegExp(
-    "^\\s*@pytorch(merge|)bot\\s+(force\\s+)?merge\\s+this\\s*(on\\s*green)?"
-  );
   forceMergeMessagePat = new RegExp("^\\s*\\S+\\s+\\S+.*");
 
-  constructor(
-    owner: string,
-    repo: string,
-    prNum: number,
-    ctx: any,
-    url: string,
-    login: string,
-    commentId: number,
-    useReactions: boolean
-  ) {
-    this.owner = owner;
-    this.repo = repo;
-    this.prNum = prNum;
-    this.ctx = ctx;
-    this.url = url;
-    this.login = login;
-    this.commentId = commentId;
-    this.useReactions = useReactions;
+  logger: PytorchBotLogger;
+
+  constructor(params: PytorchbotParams) {
+    this.owner = params.owner;
+    this.repo = params.repo;
+    this.prNum = params.prNum;
+    this.ctx = params.ctx;
+    this.url = params.url;
+    this.login = params.login;
+    this.commentId = params.commentId;
+    this.commentBody = params.commentBody;
+    this.useReactions = params.useReactions;
+
+    this.logger = new PytorchBotLogger(params);
   }
 
   async ackComment() {
@@ -46,35 +54,18 @@ class PytorchBotHandler {
     }
   }
 
-  async dispatchEvent(
-    event_type: string,
-    force: boolean = false,
-    onGreen: boolean = false,
-    landChecks: boolean = false,
-    reason: string = "",
-    branch: string = ""
-  ) {
+  async dispatchEvent(event_type: string, payload: any) {
     const { owner, repo, url, ctx, prNum, commentId } = this;
-    let payload: any = {
+
+    let filtered_payload = _.pickBy(payload, function (val) {
+      return val !== "" && val !== false;
+    });
+
+    let client_payload = {
       pr_num: prNum,
       comment_id: commentId,
+      ...filtered_payload,
     };
-
-    if (force) {
-      payload.force = true;
-    } else if (onGreen) {
-      payload.on_green = true;
-    } else if (landChecks) {
-      payload.land_checks = true;
-    }
-
-    if (reason.length > 0) {
-      payload.reason = reason;
-    }
-
-    if (branch.length > 0) {
-      payload.branch = branch;
-    }
 
     ctx.log(
       `Creating dispatch event of type "${event_type}" for comment ${url}`
@@ -83,7 +74,7 @@ class PytorchBotHandler {
       owner: owner,
       repo: repo,
       event_type: event_type,
-      client_payload: payload,
+      client_payload: client_payload,
     });
   }
 
@@ -102,6 +93,7 @@ class PytorchBotHandler {
     leaveMessage: boolean,
     message: string = "@pytorch bot did not understand your command. Please try `@pytorchbot --help` for other commands."
   ) {
+    await this.logger.log("confused", { message });
     if (this.useReactions) {
       await reactOnComment(this.ctx, "confused");
     }
@@ -121,36 +113,84 @@ class PytorchBotHandler {
     return matches != undefined && matches.length != 0;
   }
 
-  async handleMerge(
-    forceMessage: string,
-    mergeOnGreen: boolean,
-    landChecks: boolean
-  ) {
-    const isForced = forceMessage != undefined;
-    const isValidMessage = this.isValidForceMergeMessage(forceMessage);
+  async reasonToRejectForceRequest(
+    forceMessage: string
+  ): Promise<string | null> {
+    const { ctx } = this;
 
-    if (!isForced || isValidMessage) {
-      await this.dispatchEvent("try-merge", isForced, mergeOnGreen, landChecks);
-      await this.ackComment();
-    } else {
-      await this.handleConfused(
-        true,
-`You need to provide a reason for using force merge, in the format @pytorchbot merge -f 'Explanation'.
+    const hasWritePermission = await this.hasWritePermissions(
+      ctx.payload?.comment?.user?.login
+    );
+    if (!hasWritePermission) {
+      return "You are not authorized to force merges to this repository. Please use the regular `@pytorchmergebot merge` command instead";
+    }
+
+    const isValidMessage = this.isValidForceMergeMessage(forceMessage);
+    if (!isValidMessage) {
+      return `You need to provide a reason for using force merge, in the format @pytorchbot merge -f 'Explanation'.
 The explanation needs to be clear on why this is needed. Here are some good examples:
 * Bypass checks due to unrelated upstream failures from ...
 * This is a minor fix to ..., which shouldn't break anything
 * This is pre-tested in a previous CI run
-* Bypass flaky ... check`
-      );
+* Bypass flaky ... check`;
+    }
+
+    return null;
+  }
+
+  async handleMerge(
+    forceMessage: string,
+    mergeOnGreen: boolean,
+    landChecks: boolean,
+    landChecksEnrolled: boolean,
+    rebase: string | boolean
+  ) {
+    const extra_data = {
+      forceMessage,
+      mergeOnGreen,
+      landChecks,
+      landChecksEnrolled,
+      rebase,
+    };
+    const forceRequested = forceMessage != undefined;
+    let rejection_reason = null;
+
+    if (forceRequested) {
+      rejection_reason = await this.reasonToRejectForceRequest(forceMessage);
+    }
+
+    if (!rejection_reason) {
+      if (rebase === true) {
+        const { ctx, owner, repo } = this;
+        rebase = (
+          await ctx.octokit.rest.repos.get({
+            owner,
+            repo,
+          })
+        )?.data?.default_branch;
+      }
+      await this.logger.log("merge", extra_data);
+      await this.dispatchEvent("try-merge", {
+        force: forceRequested,
+        on_green: mergeOnGreen,
+        land_checks: landChecks || landChecksEnrolled,
+        rebase: rebase,
+      });
+      await this.ackComment();
+    } else {
+      await this.logger.log("merge-error", extra_data);
+      await this.handleConfused(true, rejection_reason);
     }
   }
 
   async handleRevert(reason: string) {
-    await this.dispatchEvent("try-revert", false, false, false, reason);
+    await this.logger.log("revert", { reason });
+    await this.dispatchEvent("try-revert", { reason: reason });
     await this.ackComment();
   }
 
   async handleRebase(branch: string) {
+    await this.logger.log("rebase", { branch });
     const { ctx } = this;
     async function comment_author_in_pytorch_org() {
       try {
@@ -170,7 +210,7 @@ The explanation needs to be clear on why this is needed. Here are some good exam
       ctx.payload.comment.user.login == ctx.payload.issue.user.login ||
       (await comment_author_in_pytorch_org())
     ) {
-      await this.dispatchEvent("try-rebase", false, false, false, "", branch);
+      await this.dispatchEvent("try-rebase", { branch: branch });
       await this.ackComment();
     } else {
       await this.addComment(
@@ -191,7 +231,23 @@ The explanation needs to be clear on why this is needed. Here are some good exam
     return labels.map((d: any) => d.name);
   }
 
+  async getUserPermissions(username: string): Promise<string> {
+    const { ctx, owner, repo } = this;
+    const res = await ctx.octokit.repos.getCollaboratorPermissionLevel({
+      owner: owner,
+      repo: repo,
+      username,
+    });
+    return res?.data?.permission;
+  }
+
+  async hasWritePermissions(username: string): Promise<boolean> {
+    const permissions = await this.getUserPermissions(username);
+    return permissions === "admin" || permissions === "write";
+  }
+
   async handleLabel(labels: string[]) {
+    await this.logger.log("label", { labels });
     const { ctx } = this;
     /**
      * 1. Get all existing repo labels
@@ -205,6 +261,19 @@ The explanation needs to be clear on why this is needed. Here are some good exam
 
     const filteredLabels = labelsToAdd.filter((l: string) => repoLabels.has(l));
     const invalidLabels = labelsToAdd.filter((l: string) => !repoLabels.has(l));
+    const ciflowLabels = labelsToAdd.filter((l: string) =>
+      l.startsWith("ciflow/")
+    );
+    const hasWritePermission = await this.hasWritePermissions(
+      ctx.payload?.comment?.user?.login
+    );
+    if (!hasWritePermission && ciflowLabels.length > 0) {
+      return await this.addComment(
+        "Can't add following labels to PR: " +
+          ciflowLabels.join(", ") +
+          " Please ping one of the reviewers for help."
+      );
+    }
     if (invalidLabels.length > 0) {
       await this.addComment(
         "Didn't find following labels among repository labels: " +
@@ -243,8 +312,9 @@ The explanation needs to be clear on why this is needed. Here are some good exam
         return await this.handleMerge(
           args.force,
           args.green,
-          args.land_checks ||
-            (this.login != null && isInLandCheckAllowlist(this.login))
+          args.land_checks,
+          this.login != null && isInLandCheckAllowlist(this.login),
+          args.rebase
         );
       case "rebase": {
         if (args.stable) {

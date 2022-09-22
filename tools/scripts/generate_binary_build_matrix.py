@@ -17,16 +17,33 @@ import json
 
 from typing import Dict, List, Tuple, Optional
 
-
-CUDA_ARCHES = ["10.2", "11.3", "11.6", "11.7"]
+FULL_PYTHON_VERSIONS = ["3.7", "3.8", "3.9", "3.10"]
 ROCM_ARCHES = ["5.1.1", "5.2"]
+CUDA_ACRHES_DICT = {
+    "nightly": ["10.2", "11.6", "11.7"],
+    "test": ["10.2", "11.6"],
+    "release": ["10.2", "11.3", "11.6"]
+}
+PRE_CXX11_ABI = "pre-cxx11"
+CXX11_ABI = "cxx11-abi"
+RELEASE = "release"
+DEBUG = "debug"
 
-LINUX_GPU_RUNNER="ubuntu-20.04-m60"
-LINUX_CPU_RUNNER="ubuntu-20.04"
-WIN_GPU_RUNNER="windows-2019-m60"
-WIN_CPU_RUNNER="windows-2019"
-MACOS_M1_RUNNER="macos-m1-12"
+# By default use Nightly for CUDA arches
+CUDA_ARCHES = CUDA_ACRHES_DICT["nightly"]
 
+LINUX_GPU_RUNNER = "ubuntu-20.04-m60"
+LINUX_CPU_RUNNER = "ubuntu-20.04"
+WIN_GPU_RUNNER = "windows-2019-m60"
+WIN_CPU_RUNNER = "windows-2019"
+MACOS_M1_RUNNER = "macos-m1-12"
+MACOS_RUNNER = "macos-12"
+
+PACKAGES_TO_INSTALL_WHL = "torch torchvision torchaudio"
+PACKAGES_TO_INSTALL_CONDA = "pytorch torchvision torchaudio"
+CONDA_INSTALL_BASE = f"conda install {PACKAGES_TO_INSTALL_CONDA}"
+WHL_INSTALL_BASE = "pip3 install"
+DOWNLOAD_URL_BASE = "https://download.pytorch.org"
 
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
@@ -49,6 +66,8 @@ def validation_runner(arch_type: str, os: str) -> str:
             return WIN_CPU_RUNNER
     elif os == "macos-arm64":
         return MACOS_M1_RUNNER
+    elif os == "macos":
+        return MACOS_RUNNER
     else: # default to linux cpu runner
         return LINUX_CPU_RUNNER
 
@@ -69,10 +88,6 @@ CONDA_CONTAINER_IMAGES = {
     "cpu": "pytorch/conda-builder:cpu",
 }
 
-PRE_CXX11_ABI = "pre-cxx11"
-CXX11_ABI = "cxx11-abi"
-RELEASE = "release"
-DEBUG = "debug"
 
 LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
@@ -95,8 +110,6 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     ("cpu", CXX11_ABI): "pytorch/libtorch-cxx11-builder:cpu",
 }
 
-FULL_PYTHON_VERSIONS = ["3.7", "3.8", "3.9", "3.10"]
-
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
     return {
@@ -109,8 +122,40 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
 def list_without(in_list: List[str], without: List[str]) -> List[str]:
     return [item for item in in_list if item not in without]
 
+def get_conda_install_command(channel: str, gpu_arch_type: str, arch_version: str) -> str:
+    conda_channels = "-c pytorch" if channel == "release" else f"-c pytorch-{channel}"
 
-def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
+    if gpu_arch_type == "cuda":
+        if float(arch_version) <= 11.3:
+            conda_package_type = f"cudatoolkit={arch_version}"
+        else:
+            conda_package_type = f"pytorch-cuda={arch_version}"
+            conda_channels = f"{conda_channels} -c nvidia"
+    else:
+        conda_package_type = "cpuonly"
+
+    return f"{CONDA_INSTALL_BASE} {conda_package_type} {conda_channels}"
+
+def get_base_download_url_for_repo(repo: str, channel: str, gpu_arch_type: str, desired_cuda: str) -> str:
+    base_url_for_type = f"{DOWNLOAD_URL_BASE}/{repo}"
+    base_url_for_type = base_url_for_type if channel == "release" else f"{base_url_for_type}/{channel}"
+
+    if gpu_arch_type != "cpu":
+        base_url_for_type= f"{base_url_for_type}/{desired_cuda}"
+    else:
+        base_url_for_type= f"{base_url_for_type}/{gpu_arch_type}"
+
+    return base_url_for_type
+
+def get_libtorch_install_command(channel: str, gpu_arch_type: str, libtorch_variant: str, devtoolset: str, desired_cuda: str) -> str:
+    build_name = f"libtorch-{devtoolset}-{libtorch_variant}-latest.zip" if devtoolset ==  "cxx11-abi" else f"libtorch-{libtorch_variant}-latest.zip"
+    return f"{get_base_download_url_for_repo('libtorch', channel, gpu_arch_type, desired_cuda)}/{build_name}"
+
+def get_wheel_install_command(channel: str, gpu_arch_type: str, desired_cuda: str) -> str:
+    whl_install_command = f"{WHL_INSTALL_BASE} --pre {PACKAGES_TO_INSTALL_WHL}" if channel == "nightly" else f"{WHL_INSTALL_BASE} {PACKAGES_TO_INSTALL_WHL}"
+    return f"{whl_install_command} --extra-index-url {get_base_download_url_for_repo('whl', channel, gpu_arch_type, desired_cuda)}"
+
+def generate_conda_matrix(os: str, channel: str) -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     arches = ["cpu"]
     python_versions = FULL_PYTHON_VERSIONS
@@ -126,6 +171,7 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
+
             ret.append(
                 {
                     "python_version": python_version,
@@ -140,6 +186,8 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
                         ".", "_"
                     ),
                     "validation_runner": validation_runner(gpu_arch_type, os),
+                    "channel": channel,
+                    "installation": get_conda_install_command(channel, gpu_arch_type, arch_version)
                 }
             )
     return ret
@@ -147,10 +195,17 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
 
 def generate_libtorch_matrix(
     os: str,
-    abi_version: str,
+    channel: str,
+    abi_versions: Optional[List[str]] = None,
     arches: Optional[List[str]] = None,
     libtorch_variants: Optional[List[str]] = None,
 ) -> List[Dict[str, str]]:
+
+    ret: List[Dict[str, str]] = []
+
+    if os == "macos-arm64" or os == "macos":
+        return ret
+
     if arches is None:
         arches = ["cpu"]
         if os == "linux":
@@ -160,6 +215,12 @@ def generate_libtorch_matrix(
             # We don't build CUDA 10.2 for window see https://github.com/pytorch/pytorch/issues/65648
             arches += list_without(CUDA_ARCHES, ["10.2"])
 
+    if abi_versions is None:
+        if os == "windows":
+            abi_versions = [RELEASE, DEBUG]
+        elif os == "linux":
+            abi_versions = [PRE_CXX11_ABI, CXX11_ABI]
+
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -168,43 +229,47 @@ def generate_libtorch_matrix(
             "static-without-deps",
         ]
 
-    ret: List[Dict[str, str]] = []
-    for arch_version in arches:
-        for libtorch_variant in libtorch_variants:
-            # one of the values in the following list must be exactly
-            # CXX11_ABI, but the precise value of the other one doesn't
-            # matter
-            gpu_arch_type = arch_type(arch_version)
-            gpu_arch_version = "" if arch_version == "cpu" else arch_version
-            # ROCm builds without-deps failed even in ROCm runners; skip for now
-            if gpu_arch_type == "rocm" and "without-deps" in libtorch_variant:
-                continue
-            ret.append(
-                {
-                    "gpu_arch_type": gpu_arch_type,
-                    "gpu_arch_version": gpu_arch_version,
-                    "desired_cuda": translate_desired_cuda(
-                        gpu_arch_type, gpu_arch_version
-                    ),
-                    "libtorch_variant": libtorch_variant,
-                    "libtorch_config": abi_version if os == "windows" else "",
-                    "devtoolset": abi_version if os != "windows" else "",
-                    "container_image": LIBTORCH_CONTAINER_IMAGES[
-                        (arch_version, abi_version)
-                    ]
-                    if os != "windows"
-                    else "",
-                    "package_type": "libtorch",
-                    "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
-                        ".", "_"
-                    ),
-                }
-            )
+    for abi_version in abi_versions:
+        for arch_version in arches:
+            for libtorch_variant in libtorch_variants:
+                # one of the values in the following list must be exactly
+                # CXX11_ABI, but the precise value of the other one doesn't
+                # matter
+                gpu_arch_type = arch_type(arch_version)
+                gpu_arch_version = "" if arch_version == "cpu" else arch_version
+                # ROCm builds without-deps failed even in ROCm runners; skip for now
+                if gpu_arch_type == "rocm" and "without-deps" in libtorch_variant:
+                    continue
+                desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
+                devtoolset = abi_version if os != "windows" else ""
+                ret.append(
+                    {
+                        "gpu_arch_type": gpu_arch_type,
+                        "gpu_arch_version": gpu_arch_version,
+                        "desired_cuda": desired_cuda,
+                        "libtorch_variant": libtorch_variant,
+                        "libtorch_config": abi_version if os == "windows" else "",
+                        "devtoolset": devtoolset,
+                        "container_image": LIBTORCH_CONTAINER_IMAGES[
+                            (arch_version, abi_version)
+                        ]
+                        if os != "windows"
+                        else "",
+                        "package_type": "libtorch",
+                        "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
+                            ".", "_"
+                        ),
+                        "validation_runner": validation_runner(gpu_arch_type, os),
+                        "installation": get_libtorch_install_command(channel, gpu_arch_type, libtorch_variant, devtoolset, desired_cuda),
+                        "channel": channel
+                    }
+                )
     return ret
 
 
 def generate_wheels_matrix(
     os: str,
+    channel: str,
     arches: Optional[List[str]] = None,
     python_versions: Optional[List[str]] = None,
 ) -> List[Dict[str, str]]:
@@ -218,11 +283,6 @@ def generate_wheels_matrix(
         python_versions = list(FULL_PYTHON_VERSIONS)
         if os == "macos-arm64":
             python_versions = list_without(python_versions, ["3.7"])
-
-        if os == "linux":
-            # NOTE: We only build 3.11 wheel on linux as 3.11 is not
-            # available on conda right now
-            python_versions.append("3.11")
 
     if arches is None:
         # Define default compute archivectures
@@ -241,19 +301,21 @@ def generate_wheels_matrix(
             # Skip rocm 3.11 binaries for now as the docker image are not correct
             if python_version == "3.11" and gpu_arch_type == "rocm":
                 continue
+            desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
             ret.append(
                 {
                     "python_version": python_version,
                     "gpu_arch_type": gpu_arch_type,
                     "gpu_arch_version": gpu_arch_version,
-                    "desired_cuda": translate_desired_cuda(
-                        gpu_arch_type, gpu_arch_version
-                    ),
+                    "desired_cuda": desired_cuda,
                     "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                     "package_type": package_type,
                     "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                         ".", "_"
                     ),
+                    "validation_runner": validation_runner(gpu_arch_type, os),
+                    "installation": get_wheel_install_command(channel, gpu_arch_type, desired_cuda),
+                    "channel": channel,
                 }
             )
     return ret
@@ -281,10 +343,23 @@ def main() -> None:
         type=str,
         default=os.getenv("OS", "linux"),
     )
+    parser.add_argument(
+        "--channel",
+        help="Channel to use, default nightly",
+        type=str,
+        choices=["nightly", "test", "release", "all"],
+        default=os.getenv("CHANNEL", "nightly"),
+    )
     options = parser.parse_args()
-    includes = GENERATING_FUNCTIONS_BY_PACKAGE_TYPE[options.package_type](options.operating_system)
-    print(json.dumps({"include": includes}))
+    includes = []
 
+    if options.channel == "all":
+        for channel in CUDA_ACRHES_DICT:
+            includes.extend(GENERATING_FUNCTIONS_BY_PACKAGE_TYPE[options.package_type](options.operating_system, channel))
+    else:
+        includes = GENERATING_FUNCTIONS_BY_PACKAGE_TYPE[options.package_type](options.operating_system, options.channel)
+
+    print(json.dumps({"include": includes}))
 
 if __name__ == "__main__":
     main()

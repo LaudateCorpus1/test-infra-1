@@ -31,15 +31,16 @@ export default function WorkflowBox({
     : styles.workflowBoxSuccess;
 
   const workflowId = jobs[0].workflowId;
+  const anchorName = encodeURIComponent(workflowName.toLowerCase())
   return (
-    <div className={workflowClass}>
+    <div id={anchorName} className={workflowClass}>
       <h3>{workflowName}</h3>
       <h4>Job Status</h4>
       <>
         {jobs.sort(sortJobsByConclusion).map((job) => (
           <div key={job.id}>
             <JobSummary job={job} />
-            <LogViewer job={job} />
+            {isFailedJob(job) && (<LogViewer job={job} />)}
           </div>
         ))}
       </>
@@ -69,10 +70,21 @@ function Artifacts({ workflowId }: { workflowId: string }) {
 
   return (
     <>
-      <h4>Artifacts</h4>
-      {artifacts.map((artifact, ind) => {
-        return <JobArtifact key={ind} {...artifact} />;
-      })}
+      <details>
+        <summary
+          style={{
+            fontSize: "1em",
+            marginTop: "1.33em",
+            marginBottom: "1.33em",
+            fontWeight: "bold",
+          }}
+        >
+          Expand to see Artifacts
+        </summary>
+        {artifacts.map((artifact, ind) => {
+          return <JobArtifact key={ind} {...artifact} />;
+        })}
+      </details>
     </>
   );
 }

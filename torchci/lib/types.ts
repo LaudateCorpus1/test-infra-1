@@ -16,7 +16,6 @@ export interface JobData {
   durationS?: number;
   failureLine?: string;
   failureLineNumber?: number;
-  failureContext?: string;
   failureCaptures?: string;
   repo?: string;
   failureAnnotation?: string;
@@ -102,6 +101,7 @@ export interface RecentWorkflowsData {
 
 export interface TTSChange {
   name: string | undefined;
+  htmlUrl: string | undefined;
   duration: string;
   color: string;
   percentChangeString: string;

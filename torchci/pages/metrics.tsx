@@ -523,12 +523,12 @@ export default function Page() {
         <Grid container item xs={2} justifyContent={"stretch"}>
           <Stack justifyContent={"space-between"} flexGrow={1}>
             <ScalarPanel
-              title={"viable/strict lag"}
-              queryName={"strict_lag_sec"}
-              metricName={"strict_lag_sec"}
-              valueRenderer={(value) => durationDisplay(value)}
-              queryParams={[]}
-              badThreshold={(value) => value > 60 * 60 * 6} // 6 hours
+              title={"# force merges"}
+              queryName={"number_of_force_pushes"}
+              metricName={"count"}
+              valueRenderer={(value: string) => value}
+              queryParams={timeParams}
+              badThreshold={(_) => false} // we haven't decided on the threshold here yet
             />
             <WorkflowDuration
               percentileParam={percentileParam}
@@ -542,15 +542,25 @@ export default function Page() {
           <MasterCommitRedPanel params={timeParams} />
         </Grid>
 
-        <Grid item xs={2}>
-          <ScalarPanel
-            title={"% commits red on master, aggregate"}
-            queryName={"master_commit_red_avg"}
-            metricName={"red"}
-            valueRenderer={(value) => (value * 100).toFixed(2) + "%"}
-            queryParams={timeParams}
-            badThreshold={(value) => value > 0.5}
-          />
+        <Grid container item xs={2} justifyContent={"stretch"}>
+          <Stack justifyContent={"space-between"} flexGrow={1}>
+            <ScalarPanel
+              title={"% commits red on master, aggregate"}
+              queryName={"master_commit_red_avg"}
+              metricName={"red"}
+              valueRenderer={(value) => (value * 100).toFixed(2) + "%"}
+              queryParams={timeParams}
+              badThreshold={(value) => value > 0.5}
+            />
+            <ScalarPanel
+              title={"viable/strict lag"}
+              queryName={"strict_lag_sec"}
+              metricName={"strict_lag_sec"}
+              valueRenderer={(value) => durationDisplay(value)}
+              queryParams={[]}
+              badThreshold={(value) => value > 60 * 60 * 6} // 6 hours
+            />
+          </Stack>
         </Grid>
 
         <Grid container item xs={2} justifyContent={"stretch"}>
@@ -612,7 +622,7 @@ export default function Page() {
                   name: "jobNames",
                   type: "string",
                   value:
-                    "docs push / build-docs (python),docs push / build-docs (cpp)",
+                    "docs push / build-docs (python, 30);docs push / build-docs (cpp, 180)",
                 },
               ]}
               badThreshold={(value) => value > 3 * 24 * 60 * 60} // 3 day
@@ -749,6 +759,20 @@ export default function Page() {
           percentileParam={percentileParam}
           timeParams={timeParams}
         />
+
+        <Grid item xs={6} height={ROW_HEIGHT}>
+          <TimeSeriesPanel
+            title={"Number of tests run"}
+            queryName={"num_tests_run"}
+            queryParams={[...timeParams]}
+            granularity={"minute"}
+            groupByFieldName={"workflow_name"}
+            timeFieldName={"push_event_time"}
+            yAxisFieldName={"avg_num_tests"}
+            yAxisRenderer={(value) => value}
+            additionalOptions={{ yAxis: { scale: true } }}
+          />
+        </Grid>
       </Grid>
     </div>
   );

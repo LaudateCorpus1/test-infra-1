@@ -14,7 +14,7 @@ const landCheckPilotGroup = new Set([
   "osalpekar",
   "malfet",
   "kit1980",
-  // Core members
+  // Core
   "albanD",
   "anjali411",
   "bdhirsh",
@@ -31,30 +31,40 @@ const landCheckPilotGroup = new Set([
   "samdow",
   "SherlockNoMad",
   "dagitses",
-]);
-
-export const POSSIBLE_USERS = [
-  "swang392",
-  "janeyx99",
-  "atalman",
-  "clee2000",
-  "seemethere",
-  "huydhn",
-  "zengk95",
-  "linbinyu",
-  "suo",
-  "dagitses",
-  "malfet",
-  "mehtanirav",
-  "kit1980",
-  "b0noI",
-  "weiwangmeta",
-  "ZainRizvi",
-  "DanilBaibak",
-  "jeanschmidt",
-  "osalpekar",
-];
+  // Distributed
+  "aazzolini",
+  "awgu",
+  "yhcharles",
+  "H-Huang",
+  "wz337",
+  "fduwjj",
+  "kwen2501",
+  "mingzhe09088",
+  "pbelevich",
+  "pritamdamania87",
+  "kumpera",
+  "rohan-varma",
+  "mrshenli",
+  "wanchaol",
+  "zhaojuanmao",
+  "yaroslavvb",
+  // Quansight
+  "nkaretnikov",
+  "pearu",
+  "ysiraichi",
+  "vfdev-5",
+  "pmeier",
+  "bjuncek",
+  "lezcano",
+  "nikitaved",
+  "kurtamohler",
+  "kshitij12345",
+  "peterbell10",
+  "HaoZeke",
+  "amjames",
+  "fdrocha",
+].map(x => x.toLowerCase()));
 
 export function isInLandCheckAllowlist(username: string) {
-  return landCheckPilotGroup.has(username);
+  return landCheckPilotGroup.has(username.toLowerCase());
 }

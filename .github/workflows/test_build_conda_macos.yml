@@ -1,0 +1,47 @@
+name: Test Build MacOS Conda
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/test_build_conda_macos.yml
+      - .github/workflows/build_conda_macos.yml
+      - .github/workflows/generate_binary_build_matrix.yml
+
+jobs:
+  generate-matrix:
+    uses: ./.github/workflows/generate_binary_build_matrix.yml
+    with:
+      package-type: conda
+      os: macos
+      test-infra-repository: ${{ github.repository }}
+      test-infra-ref: ${{ github.ref }}
+  test:
+    needs: generate-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repository: pytorch/audio
+            pre-script: packaging/pre_build_script.sh
+            post-script: packaging/post_build_script.sh
+            conda-package-directory: packaging/torchaudio
+          - repository: pytorch/vision
+            pre-script: ""
+            post-script: ""
+            conda-package-directory: packaging/torchvision
+          - repository: pytorch/text
+            pre-script: ""
+            post-script: ""
+            conda-package-directory: packaging/torchtext
+    name: ${{ matrix.repository }}
+    uses: ./.github/workflows/build_conda_macos.yml
+    with:
+      conda-package-directory: ${{ matrix.conda-package-directory }}
+      repository: ${{ matrix.repository }}
+      ref: nightly
+      test-infra-repository: ${{ github.repository }}
+      test-infra-ref: ${{ github.ref }}
+      build-matrix: ${{ needs.generate-matrix.outputs.matrix }}
+      pre-script: ${{ matrix.pre-script }}
+      post-script: ${{ matrix.post-script }}
+      runner-type: macos-12
