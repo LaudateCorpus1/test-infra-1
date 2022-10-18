@@ -1,9 +1,8 @@
 import _ from "lodash";
 import shlex from "shlex";
-import { addLabels, reactOnComment } from "./botUtils";
+import { addLabels, hasWritePermissions as _hasWP, reactOnComment } from "./botUtils";
 import { getHelp, getParser } from "./cliParser";
 import PytorchBotLogger from "./pytorchbotLogger";
-import { isInLandCheckAllowlist } from "./rolloutUtils";
 
 export interface PytorchbotParams {
   owner: string;
@@ -142,14 +141,12 @@ The explanation needs to be clear on why this is needed. Here are some good exam
     forceMessage: string,
     mergeOnGreen: boolean,
     landChecks: boolean,
-    landChecksEnrolled: boolean,
     rebase: string | boolean
   ) {
     const extra_data = {
       forceMessage,
       mergeOnGreen,
       landChecks,
-      landChecksEnrolled,
       rebase,
     };
     const forceRequested = forceMessage != undefined;
@@ -160,20 +157,22 @@ The explanation needs to be clear on why this is needed. Here are some good exam
     }
 
     if (!rejection_reason) {
-      if (rebase === true) {
-        const { ctx, owner, repo } = this;
-        rebase = (
-          await ctx.octokit.rest.repos.get({
-            owner,
-            repo,
-          })
-        )?.data?.default_branch;
+      if (
+        rebase &&
+        !(await this.hasWritePermissions(
+          this.ctx.payload?.comment?.user?.login
+        ))
+      ) {
+        await this.addComment(
+          "You don't have permissions to rebase this PR, only people with write permissions may rebase PRs."
+        );
+        rebase = false;
       }
       await this.logger.log("merge", extra_data);
       await this.dispatchEvent("try-merge", {
         force: forceRequested,
         on_green: mergeOnGreen,
-        land_checks: landChecks || landChecksEnrolled,
+        land_checks: landChecks,
         rebase: rebase,
       });
       await this.ackComment();
@@ -192,29 +191,12 @@ The explanation needs to be clear on why this is needed. Here are some good exam
   async handleRebase(branch: string) {
     await this.logger.log("rebase", { branch });
     const { ctx } = this;
-    async function comment_author_in_pytorch_org() {
-      try {
-        return (
-          (
-            await ctx.octokit.rest.orgs.getMembershipForUser({
-              org: "pytorch",
-              username: ctx.payload.comment.user.login,
-            })
-          )?.data?.state == "active"
-        );
-      } catch (error) {
-        return false;
-      }
-    }
-    if (
-      ctx.payload.comment.user.login == ctx.payload.issue.user.login ||
-      (await comment_author_in_pytorch_org())
-    ) {
+    if (await this.hasWritePermissions(ctx.payload?.comment?.user?.login)) {
       await this.dispatchEvent("try-rebase", { branch: branch });
       await this.ackComment();
     } else {
       await this.addComment(
-        "You don't have permissions to rebase this PR, only the PR author and pytorch organization members may rebase this PR."
+        "You don't have permissions to rebase this PR, only people with write permissions may rebase PRs."
       );
     }
   }
@@ -231,19 +213,8 @@ The explanation needs to be clear on why this is needed. Here are some good exam
     return labels.map((d: any) => d.name);
   }
 
-  async getUserPermissions(username: string): Promise<string> {
-    const { ctx, owner, repo } = this;
-    const res = await ctx.octokit.repos.getCollaboratorPermissionLevel({
-      owner: owner,
-      repo: repo,
-      username,
-    });
-    return res?.data?.permission;
-  }
-
   async hasWritePermissions(username: string): Promise<boolean> {
-    const permissions = await this.getUserPermissions(username);
-    return permissions === "admin" || permissions === "write";
+    return _hasWP(this.ctx, username);
   }
 
   async handleLabel(labels: string[]) {
@@ -313,11 +284,10 @@ The explanation needs to be clear on why this is needed. Here are some good exam
           args.force,
           args.green,
           args.land_checks,
-          this.login != null && isInLandCheckAllowlist(this.login),
           args.rebase
         );
       case "rebase": {
-        if (args.stable) {
+        if (!args.branch) {
           args.branch = "viable/strict";
         }
         return await this.handleRebase(args.branch);
