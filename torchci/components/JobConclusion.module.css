@@ -5,7 +5,7 @@
 }
 
 .classified {
-  color: lightcoral;
+  color: lightpink;
 }
 
 .success {
@@ -42,4 +42,8 @@
 
 .all_null {
   color: grey;
+}
+
+.flaky {
+  color: lightgreen;
 }

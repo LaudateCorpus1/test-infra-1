@@ -105,8 +105,11 @@ function MasterCommitRedPanel({ params }: { params: RocksetParam[] }) {
   }
 
   const options: EChartsOption = {
-    title: { text: "Commits red on master, by day" },
-    grid: { top: 48, right: 8, bottom: 24, left: 36 },
+    title: {
+      text: "Commits red on master, by day",
+      subtext: "Based on workflows which block viable/strict upgrade"
+    },
+    grid: { top: 60, right: 8, bottom: 24, left: 36 },
     dataset: { source: data },
     xAxis: { type: "category" },
     yAxis: {
@@ -469,6 +472,11 @@ export default function Page() {
     value: ttsPercentile,
   };
 
+  var numberFormat = Intl.NumberFormat('en-US', {
+    notation: "compact",
+    maximumFractionDigits: 1
+  });
+
   return (
     <div>
       <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
@@ -502,12 +510,13 @@ export default function Page() {
               badThreshold={(value) => value > 0.5}
             />
             <ScalarPanel
-              title={"% red jobs red on master, aggregate"}
-              queryName={"master_jobs_red_avg"}
-              metricName={"red"}
-              valueRenderer={(value) => (value * 100).toFixed(2) + "%"}
+              title={"# commits"}
+              queryName={"num_commits_master"}
+              queryCollection={"commons"}
+              metricName={"num"}
+              valueRenderer={(value) => value}
               queryParams={timeParams}
-              badThreshold={(value) => value > 0.01}
+              badThreshold={(_) => false}
             />
           </Stack>
         </Grid>
@@ -632,7 +641,9 @@ export default function Page() {
                   name: "jobNames",
                   type: "string",
                   value:
-                    "docs push / build-docs (python, 30);docs push / build-docs (cpp, 180)",
+                    // The new names are fixed at build-docs-${{ DOC_TYPE }}-${{ PUSHED }}. The PUSHED parameter will always be
+                    // true here because docs are pushed to GitHub, for example, nightly
+                    "docs push / build-docs-python-true;docs push / build-docs-cpp-true;docs push / build-docs-functorch-true",
                 },
               ]}
               badThreshold={(value) => value > 3 * 24 * 60 * 60} // 3 day
@@ -779,7 +790,7 @@ export default function Page() {
             groupByFieldName={"workflow_name"}
             timeFieldName={"push_event_time"}
             yAxisFieldName={"avg_num_tests"}
-            yAxisRenderer={(value) => value}
+            yAxisRenderer={(value) => numberFormat.format(parseInt(value))}
             additionalOptions={{ yAxis: { scale: true } }}
           />
         </Grid>
@@ -794,6 +805,34 @@ export default function Page() {
             yAxisFieldName={"number_of_new_disabled_tests"}
             yAxisRenderer={(value) => value}
             additionalOptions={{ yAxis: { scale: true } }}
+          />
+        </Grid>
+
+        <Grid item xs={6} height={ROW_HEIGHT}>
+          <TablePanel
+            title={"Failed Jobs Log Classifications"}
+            queryName={"log_captures_count"}
+            queryCollection={"metrics"}
+            queryParams={[...timeParams]}
+            columns={[
+              { field: "num", headerName: "Count", flex: 1 },
+              { field: "example", headerName: "Example", flex: 4 },
+              {
+                field: "search_string",
+                headerName: "Captures",
+                flex: 4,
+                renderCell: (params: GridRenderCellParams<string>) => {
+                  const url = params.value
+                    ? `failure/${encodeURIComponent(params.row.search_string)}`
+                    : "failure/";
+                  return <a href={url}>{params.value}</a>;
+                },
+              },
+            ]}
+            dataGridProps={{
+              getRowId: (el: any) =>
+                el.search_string ? el.search_string : "null",
+            }}
           />
         </Grid>
       </Grid>

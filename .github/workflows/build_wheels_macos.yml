@@ -43,6 +43,10 @@ on:
         description: "Trigger Event in caller that determines whether or not to upload"
         default: ""
         type: string
+      smoke-test-script:
+        description: "Script for Smoke Test for a specific domain"
+        default: ""
+        type: string
     secrets:
       AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID:
         description: "AWS Access Key passed from caller workflow"
@@ -67,6 +71,12 @@ jobs:
     # to have a conversation
     timeout-minutes: 60
     steps:
+      - name: Clean workspace
+        run: |
+          echo "::group::Cleanup debug output"
+          rm -rfv "${GITHUB_WORKSPACE}"
+          mkdir -p "${GITHUB_WORKSPACE}"
+          echo "::endgroup::"
       - uses: actions/checkout@v3
         with:
           # Support the use case where we need to checkout someone's fork
@@ -93,6 +103,7 @@ jobs:
           PRE_SCRIPT: ${{ inputs.pre-script }}
         if: ${{ inputs.pre-script != '' }}
         run: |
+          source "${BUILD_ENV_FILE}"
           if [[ ! -f ${PRE_SCRIPT} ]]; then
             echo "::error::Specified pre-script file (${PRE_SCRIPT}) not found, not going execute it"
             exit 1
@@ -108,12 +119,21 @@ jobs:
         working-directory: ${{ inputs.repository }}
         run: |
           source "${BUILD_ENV_FILE}"
+
+          if [[ "${{ inputs.package-name }}" = "torchaudio" ]]; then
+            export USE_FFMPEG="1"
+            export USE_OPENMP="0"
+          fi
+
+          export FFMPEG_ROOT="${PWD}/third_party/ffmpeg"
+
           ${CONDA_RUN} python3 setup.py bdist_wheel
       - name: Delocate wheel
         working-directory: ${{ inputs.repository }}
         run: |
           ${CONDA_RUN} DYLD_FALLBACK_LIBRARY_PATH="${CONDA_ENV}/lib" delocate-wheel -v --ignore-missing-dependencies dist/*.whl
       - name: Upload wheel to GitHub
+        continue-on-error: true
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.ARTIFACT_NAME }}
@@ -124,11 +144,37 @@ jobs:
           POST_SCRIPT: ${{ inputs.post-script }}
         if: ${{ inputs.post-script != '' }}
         run: |
+          source "${BUILD_ENV_FILE}"
           if [[ ! -f ${POST_SCRIPT} ]]; then
             echo "::error::Specified post-script file (${POST_SCRIPT}) not found, not going execute it"
             exit 1
           else
             ${CONDA_RUN} bash "${POST_SCRIPT}"
+          fi
+      - name: Smoke Test
+        shell: bash -l {0}
+        env:
+          PACKAGE_NAME: ${{ inputs.package-name }}
+          SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+        run: |
+          source "${BUILD_ENV_FILE}"
+          WHEEL_NAME=$(ls "${{ inputs.repository }}/dist/")
+          echo "$WHEEL_NAME"
+
+          ${CONDA_RUN} pip install "${{ inputs.repository }}/dist/$WHEEL_NAME"
+          ${CONDA_RUN} pip install numpy
+
+          if [[ ! -f "${{ inputs.repository }}"/${SMOKE_TEST_SCRIPT} ]]; then
+            echo "${{ inputs.repository }}/${SMOKE_TEST_SCRIPT} not found"
+            ${CONDA_RUN} python -c "import ${PACKAGE_NAME}; print('package version is ', ${PACKAGE_NAME}.__version__)"
+          else
+            echo "${{ inputs.repository }}/${SMOKE_TEST_SCRIPT} found"
+
+            export DYLD_FALLBACK_LIBRARY_PATH="${PWD}/${{ inputs.repository }}/third_party/ffmpeg/lib"
+            echo $DYLD_FALLBACK_LIBRARY_PATH
+
+            ${CONDA_RUN} conda install ffmpeg
+            ${CONDA_RUN} python3 "${{ inputs.repository }}/${SMOKE_TEST_SCRIPT}"
           fi
       - name: Upload package to pytorch.org
         if: ${{ inputs.trigger-event == 'push' }}
@@ -141,7 +187,8 @@ jobs:
           source "${BUILD_ENV_FILE}"
           ${CONDA_RUN} pip install awscli
           for pkg in dist/*; do
-            ${CONDA_RUN} aws s3 cp "$pkg" "s3://pytorch/whl/${CHANNEL}/${{ matrix.desired_cuda }}" --acl public-read
+            # PYTORCH_S3_BUCKET_PATH derived from pkg-helpers
+            ${CONDA_RUN} aws s3 cp "$pkg" "${PYTORCH_S3_BUCKET_PATH}" --acl public-read
           done
 
 concurrency:

@@ -27,6 +27,7 @@ import {
   scaleDown,
   sortRunnersByLaunchTime,
 } from './scale-down';
+import { RequestError } from '@octokit/request-error';
 
 jest.mock('./gh-runners', () => ({
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
@@ -69,15 +70,21 @@ const metrics = new MetricsModule.ScaleDownMetrics();
 
 const minimumRunningTimeInMinutes = 10;
 const environment = 'environment';
+const subnetIds = new Map([['us-east-1', new Set(['sub-0987', 'sub-7890'])]]);
 const baseConfig = {
   minimumRunningTimeInMinutes: minimumRunningTimeInMinutes,
   environment: environment,
   minAvailableRunners: 0,
+  awsRegion: 'us-east-1',
+  shuffledAwsRegionInstances: ['us-east-1'],
+  shuffledSubnetIdsForAwsRegion: jest.fn().mockImplementation((awsRegion: string) => {
+    return Array.from(subnetIds.get(awsRegion) ?? []).sort();
+  }),
 };
 
 describe('scale-down', () => {
   beforeEach(() => {
-    jest.spyOn(Config, 'Instance', 'get').mockImplementation(() => baseConfig as Config);
+    jest.spyOn(Config, 'Instance', 'get').mockImplementation(() => baseConfig as unknown as Config);
     jest.spyOn(MetricsModule, 'ScaleDownMetrics').mockReturnValue(metrics);
     jest.spyOn(metrics, 'sendMetrics').mockImplementation(async () => {
       return;
@@ -115,6 +122,7 @@ describe('scale-down', () => {
     it('ec2runner with repo = undefined && org = undefined', async () => {
       mocked(listRunners).mockResolvedValue([
         {
+          awsRegion: Config.Instance.awsRegion,
           instanceId: 'WG113',
           launchTime: moment(new Date())
             .subtract(minimumRunningTimeInMinutes + 5, 'minutes')
@@ -163,7 +171,7 @@ describe('scale-down', () => {
       mockRunner({ id: '0004', name: 'keep-this-is-busy-02', busy: true }),
       mockRunner({ id: '0005', name: 'keep-this-not-min-time-03', busy: false }),
       mockRunner({ id: '0006', name: 'keep-this-is-busy-03', busy: true }),
-      mockRunner({ id: '0007', name: 'remove-ephemeral-01', busy: false }),
+      mockRunner({ id: '0007', name: 'remove-ephemeral-01-fail-ghr', busy: false }),
       mockRunner({ id: '0008', name: 'keep-min-runners-not-oldest-01', busy: false }),
       mockRunner({ id: '0009', name: 'keep-min-runners-oldest-01', busy: false }),
       mockRunner({ id: '0010', name: 'keep-min-runners-not-oldest-02', busy: false }),
@@ -172,6 +180,7 @@ describe('scale-down', () => {
     ] as GhRunners;
     const listRunnersRet = [
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'ignore-no-org-no-repo',
         instanceId: '001',
         launchTime: dateRef
@@ -180,6 +189,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'ignore-no-org-no-repo',
         instanceId: '002',
         launchTime: dateRef
@@ -189,6 +199,7 @@ describe('scale-down', () => {
       },
 
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'ignore-no-org',
         instanceId: '003',
         repo: 'a-owner/a-repo',
@@ -198,6 +209,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'ignore-no-org',
         instanceId: '004',
         repo: 'a-owner/a-repo',
@@ -208,6 +220,7 @@ describe('scale-down', () => {
       },
 
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-all-4',
         instanceId: 'keep-this-not-min-time-01',
         org: theOrg,
@@ -217,6 +230,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-all-4',
         instanceId: 'keep-this-not-min-time-02',
         org: theOrg,
@@ -226,6 +240,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-all-4',
         instanceId: 'keep-this-is-busy-01',
         org: theOrg,
@@ -235,6 +250,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-all-4',
         instanceId: 'keep-this-is-busy-02',
         org: theOrg,
@@ -245,6 +261,7 @@ describe('scale-down', () => {
       },
 
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'a-ephemeral-runner',
         instanceId: 'keep-this-not-min-time-03',
         org: theOrg,
@@ -254,6 +271,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'a-ephemeral-runner',
         instanceId: 'keep-this-is-busy-03',
         org: theOrg,
@@ -263,8 +281,9 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'a-ephemeral-runner',
-        instanceId: 'remove-ephemeral-01', // X
+        instanceId: 'remove-ephemeral-01-fail-ghr', // X
         org: theOrg,
         launchTime: dateRef
           .clone()
@@ -272,6 +291,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'a-ephemeral-runner',
         instanceId: 'remove-ephemeral-02', // X
         org: theOrg,
@@ -282,6 +302,7 @@ describe('scale-down', () => {
       },
 
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-min-runners-oldest',
         instanceId: 'keep-min-runners-not-oldest-01',
         org: theOrg,
@@ -291,6 +312,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-min-runners-oldest',
         instanceId: 'keep-min-runners-oldest-01', // X
         org: theOrg,
@@ -300,6 +322,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-min-runners-oldest',
         instanceId: 'keep-min-runners-not-oldest-02',
         org: theOrg,
@@ -309,6 +332,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-min-runners-oldest',
         instanceId: 'keep-min-runners-oldest-02', // X
         org: theOrg,
@@ -317,8 +341,8 @@ describe('scale-down', () => {
           .subtract(minimumRunningTimeInMinutes + 8, 'minutes')
           .toDate(),
       },
-
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-lt-min-no-ghrunner',
         instanceId: 'keep-lt-min-no-ghrunner-no-ghr-01', // X
         org: theOrg,
@@ -328,6 +352,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-lt-min-no-ghrunner',
         instanceId: 'keep-lt-min-no-ghrunner-no-ghr-02', // X
         org: theOrg,
@@ -337,6 +362,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-lt-min-no-ghrunner',
         instanceId: 'keep-lt-min-no-ghrunner-01',
         org: theOrg,
@@ -366,7 +392,7 @@ describe('scale-down', () => {
             scaleConfigRepo: scaleConfigRepo,
             minAvailableRunners: 2,
             environment: environment,
-          } as Config),
+          } as unknown as Config),
       );
     });
 
@@ -380,6 +406,14 @@ describe('scale-down', () => {
       mockedListRunners.mockResolvedValueOnce(listRunnersRet);
       mockedListGithubRunnersOrg.mockResolvedValue(ghRunners);
       mockedGetRunnerTypes.mockResolvedValue(runnerTypes);
+      mockedRemoveGithubRunnerOrg.mockImplementation(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        async (runnerId: number, org: string, metrics: MetricsModule.Metrics) => {
+          if (runnerId == 7) {
+            throw 'Failure';
+          }
+        },
+      );
 
       await scaleDown();
 
@@ -389,52 +423,42 @@ describe('scale-down', () => {
       expect(mockedListGithubRunnersOrg).toBeCalledTimes(15);
       expect(mockedListGithubRunnersOrg).toBeCalledWith(theOrg, metrics);
 
-      expect(mockedGetRunnerTypes).toBeCalledTimes(3);
+      expect(mockedGetRunnerTypes).toBeCalledTimes(4);
       expect(mockedGetRunnerTypes).toBeCalledWith({ owner: theOrg, repo: scaleConfigRepo }, metrics);
 
       expect(mockedRemoveGithubRunnerOrg).toBeCalledTimes(3);
       {
         const { awsR, ghR } = getRunnerPair('keep-min-runners-oldest-02');
-        expect(mockedRemoveGithubRunnerOrg).toBeCalledWith(awsR, ghR.id, awsR.org as string, metrics);
+        expect(mockedRemoveGithubRunnerOrg).toBeCalledWith(ghR.id, awsR.org as string, metrics);
       }
       {
         const { awsR, ghR } = getRunnerPair('keep-min-runners-oldest-01');
-        expect(mockedRemoveGithubRunnerOrg).toBeCalledWith(awsR, ghR.id, awsR.org as string, metrics);
+        expect(mockedRemoveGithubRunnerOrg).toBeCalledWith(ghR.id, awsR.org as string, metrics);
       }
       {
-        const { awsR, ghR } = getRunnerPair('remove-ephemeral-01');
-        expect(mockedRemoveGithubRunnerOrg).toBeCalledWith(awsR, ghR.id, awsR.org as string, metrics);
+        const { awsR, ghR } = getRunnerPair('remove-ephemeral-01-fail-ghr');
+        expect(mockedRemoveGithubRunnerOrg).toBeCalledWith(ghR.id, awsR.org as string, metrics);
       }
 
-      expect(mockedTerminateRunner).toBeCalledTimes(6);
+      expect(mockedTerminateRunner).toBeCalledTimes(5);
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('keep-lt-min-no-ghrunner-no-ghr-02');
+        const { awsR } = getRunnerPair('keep-lt-min-no-ghrunner-no-ghr-02');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('keep-lt-min-no-ghrunner-no-ghr-01');
+        const { awsR } = getRunnerPair('keep-lt-min-no-ghrunner-no-ghr-01');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('keep-min-runners-oldest-02');
+        const { awsR } = getRunnerPair('keep-min-runners-oldest-02');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('keep-min-runners-oldest-01');
+        const { awsR } = getRunnerPair('keep-min-runners-oldest-01');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('remove-ephemeral-02');
-        expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
-      }
-      {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('remove-ephemeral-01');
+        const { awsR } = getRunnerPair('remove-ephemeral-02');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
     });
@@ -460,7 +484,7 @@ describe('scale-down', () => {
       mockRunner({ id: '0004', name: 'keep-this-is-busy-02', busy: true }),
       mockRunner({ id: '0005', name: 'keep-this-not-min-time-03', busy: false }),
       mockRunner({ id: '0006', name: 'keep-this-is-busy-03', busy: true }),
-      mockRunner({ id: '0007', name: 'remove-ephemeral-01', busy: false }),
+      mockRunner({ id: '0007', name: 'remove-ephemeral-01-fail-ghr', busy: false }),
       mockRunner({ id: '0008', name: 'keep-min-runners-not-oldest-01', busy: false }),
       mockRunner({ id: '0009', name: 'keep-min-runners-oldest-01', busy: false }),
       mockRunner({ id: '0010', name: 'keep-min-runners-not-oldest-02', busy: false }),
@@ -469,6 +493,7 @@ describe('scale-down', () => {
     ] as GhRunners;
     const listRunnersRet = [
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'ignore-no-org-no-repo',
         instanceId: '001',
         launchTime: dateRef
@@ -477,6 +502,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'ignore-no-org-no-repo',
         instanceId: '002',
         launchTime: dateRef
@@ -484,8 +510,8 @@ describe('scale-down', () => {
           .subtract(minimumRunningTimeInMinutes + 3, 'minutes')
           .toDate(),
       },
-
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'ignore-no-repo',
         instanceId: '003',
         org: 'a-owner',
@@ -495,6 +521,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'ignore-no-repo',
         instanceId: '004',
         org: 'a-owner',
@@ -503,8 +530,8 @@ describe('scale-down', () => {
           .subtract(minimumRunningTimeInMinutes + 3, 'minutes')
           .toDate(),
       },
-
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-all-4',
         instanceId: 'keep-this-not-min-time-01',
         repo: theRepo,
@@ -514,6 +541,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-all-4',
         instanceId: 'keep-this-not-min-time-02',
         repo: theRepo,
@@ -523,6 +551,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-all-4',
         instanceId: 'keep-this-is-busy-01',
         repo: theRepo,
@@ -532,6 +561,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-all-4',
         instanceId: 'keep-this-is-busy-02',
         repo: theRepo,
@@ -540,8 +570,8 @@ describe('scale-down', () => {
           .subtract(minimumRunningTimeInMinutes + 5, 'minutes')
           .toDate(),
       },
-
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'a-ephemeral-runner',
         instanceId: 'keep-this-not-min-time-03',
         repo: theRepo,
@@ -551,6 +581,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'a-ephemeral-runner',
         instanceId: 'keep-this-is-busy-03',
         repo: theRepo,
@@ -560,8 +591,9 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'a-ephemeral-runner',
-        instanceId: 'remove-ephemeral-01', // X
+        instanceId: 'remove-ephemeral-01-fail-ghr', // X
         repo: theRepo,
         launchTime: dateRef
           .clone()
@@ -569,6 +601,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'a-ephemeral-runner',
         instanceId: 'remove-ephemeral-02', // X
         repo: theRepo,
@@ -577,8 +610,8 @@ describe('scale-down', () => {
           .subtract(minimumRunningTimeInMinutes + 5, 'minutes')
           .toDate(),
       },
-
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-min-runners-oldest',
         instanceId: 'keep-min-runners-not-oldest-01',
         repo: theRepo,
@@ -588,6 +621,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-min-runners-oldest',
         instanceId: 'keep-min-runners-oldest-01', // X
         repo: theRepo,
@@ -597,6 +631,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-min-runners-oldest',
         instanceId: 'keep-min-runners-not-oldest-02',
         repo: theRepo,
@@ -606,6 +641,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-min-runners-oldest',
         instanceId: 'keep-min-runners-oldest-02', // X
         repo: theRepo,
@@ -614,8 +650,8 @@ describe('scale-down', () => {
           .subtract(minimumRunningTimeInMinutes + 8, 'minutes')
           .toDate(),
       },
-
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-lt-min-no-ghrunner',
         instanceId: 'keep-lt-min-no-ghrunner-no-ghr-01', // X
         repo: theRepo,
@@ -625,6 +661,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-lt-min-no-ghrunner',
         instanceId: 'keep-lt-min-no-ghrunner-no-ghr-02', // X
         repo: theRepo,
@@ -634,6 +671,7 @@ describe('scale-down', () => {
           .toDate(),
       },
       {
+        awsRegion: baseConfig.awsRegion,
         runnerType: 'keep-lt-min-no-ghrunner',
         instanceId: 'keep-lt-min-no-ghrunner-01',
         repo: theRepo,
@@ -662,7 +700,7 @@ describe('scale-down', () => {
             enableOrganizationRunners: false,
             minAvailableRunners: 2,
             environment: environment,
-          } as Config),
+          } as unknown as Config),
       );
     });
 
@@ -676,6 +714,14 @@ describe('scale-down', () => {
       mockedListRunners.mockResolvedValueOnce(listRunnersRet);
       mockedListGithubRunnersRepo.mockResolvedValue(ghRunners);
       mockedGetRunnerTypes.mockResolvedValue(runnerTypes);
+      mockedRemoveGithubRunnerRepo.mockImplementation(
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        async (runnerId: number, repo: Repo, metrics: MetricsModule.Metrics) => {
+          if (runnerId == 7) {
+            throw 'Failure';
+          }
+        },
+      );
 
       await scaleDown();
 
@@ -685,52 +731,42 @@ describe('scale-down', () => {
       expect(mockedListGithubRunnersRepo).toBeCalledTimes(15);
       expect(mockedListGithubRunnersRepo).toBeCalledWith(repo, metrics);
 
-      expect(mockedGetRunnerTypes).toBeCalledTimes(3);
+      expect(mockedGetRunnerTypes).toBeCalledTimes(4);
       expect(mockedGetRunnerTypes).toBeCalledWith(repo, metrics);
 
       expect(mockedRemoveGithubRunnerRepo).toBeCalledTimes(3);
       {
-        const { awsR, ghR } = getRunnerPair('keep-min-runners-oldest-02');
-        expect(mockedRemoveGithubRunnerRepo).toBeCalledWith(awsR, ghR.id, repo, metrics);
+        const { ghR } = getRunnerPair('keep-min-runners-oldest-02');
+        expect(mockedRemoveGithubRunnerRepo).toBeCalledWith(ghR.id, repo, metrics);
       }
       {
-        const { awsR, ghR } = getRunnerPair('keep-min-runners-oldest-01');
-        expect(mockedRemoveGithubRunnerRepo).toBeCalledWith(awsR, ghR.id, repo, metrics);
+        const { ghR } = getRunnerPair('keep-min-runners-oldest-01');
+        expect(mockedRemoveGithubRunnerRepo).toBeCalledWith(ghR.id, repo, metrics);
       }
       {
-        const { awsR, ghR } = getRunnerPair('remove-ephemeral-01');
-        expect(mockedRemoveGithubRunnerRepo).toBeCalledWith(awsR, ghR.id, repo, metrics);
+        const { ghR } = getRunnerPair('remove-ephemeral-01-fail-ghr');
+        expect(mockedRemoveGithubRunnerRepo).toBeCalledWith(ghR.id, repo, metrics);
       }
 
-      expect(mockedTerminateRunner).toBeCalledTimes(6);
+      expect(mockedTerminateRunner).toBeCalledTimes(5);
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('keep-lt-min-no-ghrunner-no-ghr-02');
+        const { awsR } = getRunnerPair('keep-lt-min-no-ghrunner-no-ghr-02');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('keep-lt-min-no-ghrunner-no-ghr-01');
+        const { awsR } = getRunnerPair('keep-lt-min-no-ghrunner-no-ghr-01');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('keep-min-runners-oldest-02');
+        const { awsR } = getRunnerPair('keep-min-runners-oldest-02');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('keep-min-runners-oldest-01');
+        const { awsR } = getRunnerPair('keep-min-runners-oldest-01');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
       {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('remove-ephemeral-02');
-        expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
-      }
-      {
-        /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-        const { awsR, ghR } = getRunnerPair('remove-ephemeral-01');
+        const { awsR } = getRunnerPair('remove-ephemeral-02');
         expect(mockedTerminateRunner).toBeCalledWith(awsR, metrics);
       }
     });
@@ -740,11 +776,13 @@ describe('scale-down', () => {
     it('two undefined', async () => {
       const ret = sortRunnersByLaunchTime([
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: undefined,
         },
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: undefined,
@@ -759,11 +797,13 @@ describe('scale-down', () => {
       const dt = moment(new Date()).toDate();
       const ret = sortRunnersByLaunchTime([
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: undefined,
         },
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: dt,
@@ -778,11 +818,13 @@ describe('scale-down', () => {
       const dt = moment(new Date()).toDate();
       const ret = sortRunnersByLaunchTime([
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: dt,
         },
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: undefined,
@@ -798,11 +840,13 @@ describe('scale-down', () => {
       const dt2 = moment(new Date()).subtract(50, 'seconds').toDate();
       const ret = sortRunnersByLaunchTime([
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: dt1,
         },
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: dt2,
@@ -818,11 +862,13 @@ describe('scale-down', () => {
       const dt2 = moment(new Date()).subtract(50, 'seconds').toDate();
       const ret = sortRunnersByLaunchTime([
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: dt2,
         },
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: dt1,
@@ -837,11 +883,13 @@ describe('scale-down', () => {
       const launchTime = moment(new Date()).subtract(50, 'seconds').toDate();
       const ret = sortRunnersByLaunchTime([
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: launchTime,
         },
         {
+          awsRegion: baseConfig.awsRegion,
           instanceId: 'WG113',
           repo: undefined,
           launchTime: launchTime,
@@ -856,6 +904,7 @@ describe('scale-down', () => {
   describe('runnerMinimumTimeExceeded', () => {
     it('launchTime === undefined', () => {
       const response = runnerMinimumTimeExceeded({
+        awsRegion: baseConfig.awsRegion,
         instanceId: 'AGDGADUWG113',
         launchTime: undefined,
       });
@@ -864,6 +913,7 @@ describe('scale-down', () => {
 
     it('exceeded minimum time', () => {
       const response = runnerMinimumTimeExceeded({
+        awsRegion: baseConfig.awsRegion,
         instanceId: 'AGDGADUWG113',
         launchTime: moment(new Date())
           .utc()
@@ -875,6 +925,7 @@ describe('scale-down', () => {
 
     it('dont exceeded minimum time', () => {
       const response = runnerMinimumTimeExceeded({
+        awsRegion: baseConfig.awsRegion,
         instanceId: 'AGDGADUWG113',
         launchTime: moment(new Date())
           .utc()
@@ -891,6 +942,7 @@ describe('scale-down', () => {
         const response = isRunnerRemovable(
           undefined,
           {
+            awsRegion: baseConfig.awsRegion,
             instanceId: 'AGDGADUWG113',
             launchTime: undefined,
           },
@@ -903,6 +955,7 @@ describe('scale-down', () => {
         const response = isRunnerRemovable(
           undefined,
           {
+            awsRegion: baseConfig.awsRegion,
             instanceId: 'AGDGADUWG113',
             launchTime: moment(new Date())
               .utc()
@@ -918,6 +971,7 @@ describe('scale-down', () => {
         const response = isRunnerRemovable(
           undefined,
           {
+            awsRegion: baseConfig.awsRegion,
             instanceId: 'AGDGADUWG113',
             launchTime: moment(new Date())
               .utc()
@@ -937,6 +991,7 @@ describe('scale-down', () => {
             busy: true,
           } as GhRunner,
           {
+            awsRegion: baseConfig.awsRegion,
             instanceId: 'AGDGADUWG113',
             launchTime: undefined,
           },
@@ -951,6 +1006,7 @@ describe('scale-down', () => {
             busy: false,
           } as GhRunner,
           {
+            awsRegion: baseConfig.awsRegion,
             instanceId: 'AGDGADUWG113',
             launchTime: undefined,
           },
@@ -965,6 +1021,7 @@ describe('scale-down', () => {
             busy: false,
           } as GhRunner,
           {
+            awsRegion: baseConfig.awsRegion,
             instanceId: 'AGDGADUWG113',
             launchTime: moment(new Date())
               .utc()
@@ -982,6 +1039,7 @@ describe('scale-down', () => {
             busy: false,
           } as GhRunner,
           {
+            awsRegion: baseConfig.awsRegion,
             instanceId: 'AGDGADUWG113',
             launchTime: moment(new Date())
               .utc()
@@ -1011,7 +1069,7 @@ describe('scale-down', () => {
               ...baseConfig,
               enableOrganizationRunners: true,
               scaleConfigRepo: scaleConfigRepo,
-            } as Config),
+            } as unknown as Config),
         );
       });
 
@@ -1069,7 +1127,7 @@ describe('scale-down', () => {
             ({
               ...baseConfig,
               enableOrganizationRunners: false,
-            } as Config),
+            } as unknown as Config),
         );
       });
 
@@ -1126,6 +1184,7 @@ describe('scale-down', () => {
     it('finds on listGithubRunnersRepo, busy === true', async () => {
       const mockedListGithubRunnersRepo = mocked(listGithubRunnersRepo);
       const ec2runner: RunnerInfo = {
+        awsRegion: baseConfig.awsRegion,
         repo: repoKey,
         instanceId: 'instance-id-01',
         runnerType: 'runnerType-01',
@@ -1144,6 +1203,7 @@ describe('scale-down', () => {
       const mockedListGithubRunnersRepo = mocked(listGithubRunnersRepo);
       const mockedGetRunnerRepo = mocked(getRunnerRepo);
       const ec2runner: RunnerInfo = {
+        awsRegion: baseConfig.awsRegion,
         repo: repoKey,
         instanceId: 'instance-id-03',
         runnerType: 'runnerType-01',
@@ -1166,6 +1226,7 @@ describe('scale-down', () => {
       const mockedListGithubRunnersRepo = mocked(listGithubRunnersRepo);
       const mockedGetRunnerRepo = mocked(getRunnerRepo);
       const ec2runner: RunnerInfo = {
+        awsRegion: baseConfig.awsRegion,
         repo: repoKey,
         instanceId: 'instance-id-03',
         runnerType: 'runnerType-01',
@@ -1194,6 +1255,7 @@ describe('scale-down', () => {
     it('finds on listGithubRunnersOrg, busy === true', async () => {
       const mockedListGithubRunnersOrg = mocked(listGithubRunnersOrg);
       const ec2runner: RunnerInfo = {
+        awsRegion: baseConfig.awsRegion,
         org: org,
         instanceId: 'instance-id-01',
         runnerType: 'runnerType-01',
@@ -1212,6 +1274,7 @@ describe('scale-down', () => {
       const mockedListGithubRunnersOrg = mocked(listGithubRunnersOrg);
       const mockedGetRunnerOrg = mocked(getRunnerOrg);
       const ec2runner: RunnerInfo = {
+        awsRegion: baseConfig.awsRegion,
         org: org,
         instanceId: 'instance-id-03',
         runnerType: 'runnerType-01',
@@ -1234,6 +1297,7 @@ describe('scale-down', () => {
       const mockedListGithubRunnersOrg = mocked(listGithubRunnersOrg);
       const mockedGetRunnerOrg = mocked(getRunnerOrg);
       const ec2runner: RunnerInfo = {
+        awsRegion: baseConfig.awsRegion,
         org: org,
         instanceId: 'instance-id-03',
         runnerType: 'runnerType-01',
@@ -1249,6 +1313,41 @@ describe('scale-down', () => {
       expect(mockedListGithubRunnersOrg).toBeCalledWith(org, metrics);
       expect(mockedGetRunnerOrg).toBeCalledTimes(1);
       expect(mockedGetRunnerOrg).toBeCalledWith(org, ec2runner.ghRunnerId, metrics);
+    });
+
+    it('getRunner throws when api rate limit is hit', async () => {
+      const mockedListGithubRunnersOrg = mocked(listGithubRunnersOrg);
+
+      mockedListGithubRunnersOrg.mockRejectedValueOnce(
+        new RequestError('API rate limit exceeded for installation ID 13954108.', 403, {
+          headers: {
+            'access-control-allow-origin': '*',
+            'x-ratelimit-limit': '20000',
+            'x-ratelimit-remaining': '0',
+            'x-ratelimit-reset': '1666378232',
+            'x-ratelimit-resource': 'core',
+            'x-ratelimit-used': '20006',
+            'x-xss-protection': '0',
+          },
+          request: {
+            method: 'GET',
+            url: 'https://api.github.com/orgs/pytorch/actions/runners?per_page=100',
+            headers: {
+              accept: 'application/vnd.github.v3+json',
+            },
+          },
+        }),
+      );
+
+      const ec2runner: RunnerInfo = {
+        awsRegion: baseConfig.awsRegion,
+        org: org,
+        instanceId: 'instance-id-03',
+        runnerType: 'runnerType-01',
+        ghRunnerId: 'ghRunnerId-01',
+      };
+
+      await expect(getGHRunnerOrg(ec2runner, metrics)).rejects.toThrow(RequestError);
     });
   });
 });

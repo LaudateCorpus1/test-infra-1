@@ -51,6 +51,17 @@ on:
         description: "Runner environment specified."
         default: ""
         type: string
+      trigger-event:
+        description: "Trigger Event in caller that determines whether or not to upload"
+        default: ""
+        type: string
+    secrets:
+      AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID:
+        description: "AWS Access Key passed from caller workflow"
+        required: false
+      AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY:
+        description: "AWS Secret Access Ket passed from caller workflow"
+        required: false
 
 jobs:
   build:
@@ -62,6 +73,7 @@ jobs:
       PACKAGE_TYPE: wheel
       REPOSITORY: ${{ inputs.repository }}
       REF: ${{ inputs.ref }}
+      UPLOAD_TO_BASE_BUCKET: ${{ matrix.upload_to_base_bucket }}
     name: ${{ matrix.build_name }}
     runs-on: ${{ inputs.runner-type }}
     defaults:
@@ -94,6 +106,7 @@ jobs:
           PRE_SCRIPT: ${{ inputs.pre-script }}
         if: ${{ inputs.pre-script != '' }}
         run: |
+          source "${BUILD_ENV_FILE}"
           if [[ ! -f ${PRE_SCRIPT} ]]; then
             echo "::error::Specified pre-script file (${PRE_SCRIPT}) not found, not going execute it"
             exit 1
@@ -123,6 +136,7 @@ jobs:
             fi
           fi
       - name: Upload wheel to GitHub
+        continue-on-error: true
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.ARTIFACT_NAME }}
@@ -133,13 +147,14 @@ jobs:
           POST_SCRIPT: ${{ inputs.post-script }}
         if: ${{ inputs.post-script != '' }}
         run: |
+          source "${BUILD_ENV_FILE}"
           if [[ ! -f ${POST_SCRIPT} ]]; then
             echo "::error::Specified post-script file (${POST_SCRIPT}) not found, not going execute it"
             exit 1
           else
             ${CONDA_RUN} bash "${POST_SCRIPT}"
           fi
-      - name: Run Primitive Smoke Tests
+      - name: Smoke Test
         env:
           PACKAGE_NAME: ${{ inputs.package-name }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
@@ -156,8 +171,20 @@ jobs:
             export LD_LIBRARY_PATH="{LD_LIBRARY_PATH}:${{ inputs.repository }}/third_party/ffmpeg/lib"
             ${CONDA_RUN} python "${{ inputs.repository }}/${SMOKE_TEST_SCRIPT}"
           fi
-
-      # TODO: Figure out upload method to s3
+      - name: Upload package to pytorch.org
+        if: ${{ inputs.trigger-event == 'push' }}
+        shell: bash -l {0}
+        working-directory: ${{ inputs.repository }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_PYTORCH_UPLOADER_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_PYTORCH_UPLOADER_SECRET_ACCESS_KEY }}
+        run: |
+          source "${BUILD_ENV_FILE}"
+          ${CONDA_RUN} pip install awscli
+          for pkg in dist/*; do
+            # PYTORCH_S3_BUCKET_PATH derived from pkg-helpers
+            ${CONDA_RUN} aws s3 cp "$pkg" "${PYTORCH_S3_BUCKET_PATH}" --acl public-read
+          done
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ inputs.repository }}-${{ github.event_name == 'workflow_dispatch' }}

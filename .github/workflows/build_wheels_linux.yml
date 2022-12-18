@@ -35,6 +35,10 @@ on:
         description: "Script for Smoke Test for a specific domain"
         default: ""
         type: string
+      env-var-script:
+        description: "Script that sets Domain-Specific Environment Variables"
+        default: ""
+        type: string
       package-name:
         description: "Name of the actual python package that is imported"
         default: ""
@@ -61,8 +65,10 @@ jobs:
       PACKAGE_TYPE: wheel
       REPOSITORY: ${{ inputs.repository }}
       REF: ${{ inputs.ref }}
+      CU_VERSION: ${{ matrix.desired_cuda }}
+      UPLOAD_TO_BASE_BUCKET: ${{ matrix.upload_to_base_bucket }}
     name: ${{ matrix.build_name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.validation_runner }}
     container:
       image: ${{ matrix.container_image }}
     # If a build is taking longer than 60 minutes on these runners we need
@@ -81,9 +87,15 @@ jobs:
           ref: ${{ inputs.ref }}
           setup-miniconda: true
           python-version: ${{ env.PYTHON_VERSION }}
+      - name: Combine Env Var and Build Env Files
+        if: ${{ inputs.env-var-script != '' }}
+        working-directory: ${{ inputs.repository }}
+        run: |
+          cat "${{ inputs.env-var-script }}" >> "${BUILD_ENV_FILE}"
       - name: Install torch dependency
         run: |
           source "${BUILD_ENV_FILE}"
+          set -ex
           # shellcheck disable=SC2086
           ${CONDA_RUN} ${PIP_INSTALL_TORCH}
       - name: Run pre-script
@@ -93,12 +105,19 @@ jobs:
         if: ${{ inputs.pre-script != '' }}
         shell: bash -l {0}
         run: |
+          source "${BUILD_ENV_FILE}"
           if [[ ! -f ${PRE_SCRIPT} ]]; then
             echo "::error::Specified pre-script file (${PRE_SCRIPT}) not found, not going execute it"
             exit 1
           else
             ${CONDA_RUN} bash "${PRE_SCRIPT}"
           fi
+      - name: Build clean
+        working-directory: ${{ inputs.repository }}
+        shell: bash -l {0}
+        run: |
+          source "${BUILD_ENV_FILE}"
+          ${CONDA_RUN} python setup.py clean
       - name: Build the wheel (bdist_wheel)
         working-directory: ${{ inputs.repository }}
         shell: bash -l {0}
@@ -108,6 +127,7 @@ jobs:
           export USE_FFMPEG="1"
           ${CONDA_RUN} python setup.py bdist_wheel
       - name: Upload wheel to GitHub
+        continue-on-error: true
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.ARTIFACT_NAME }}
@@ -119,13 +139,14 @@ jobs:
         if: ${{ inputs.post-script != '' }}
         shell: bash -l {0}
         run: |
+          source "${BUILD_ENV_FILE}"
           if [[ ! -f ${POST_SCRIPT} ]]; then
             echo "::error::Specified post-script file (${POST_SCRIPT}) not found, not going execute it"
             exit 1
           else
             ${CONDA_RUN} bash "${POST_SCRIPT}"
           fi
-      - name: Run Primitive Smoke Tests
+      - name: Smoke Test
         shell: bash -l {0}
         env:
           PACKAGE_NAME: ${{ inputs.package-name }}
@@ -135,9 +156,16 @@ jobs:
           WHEEL_NAME=$(ls "${{ inputs.repository }}/dist/")
           echo "$WHEEL_NAME"
           ${CONDA_RUN} pip install "${{ inputs.repository }}/dist/$WHEEL_NAME"
-          if [[ ! -f "${{ inputs.repository }}"/${SMOKE_TEST_SCRIPT} ]]; then
+          if [[ (! -f "${{ inputs.repository }}"/${SMOKE_TEST_SCRIPT}) ]]; then
             echo "${{ inputs.repository }}/${SMOKE_TEST_SCRIPT} not found"
-            ${CONDA_RUN} python -c "import ${PACKAGE_NAME}; print('package version is ', ${PACKAGE_NAME}.__version__)"
+            if [[ "${PACKAGE_NAME}" = "torchrec" ]]; then
+              # Special case for torchrec temporarily since __version__ does not
+              # work correctly on main in torchrec. This block will be
+              # removed once we fix it.
+              ${CONDA_RUN} python -c "import ${PACKAGE_NAME}"
+            else
+              ${CONDA_RUN} python -c "import ${PACKAGE_NAME}; print('package version is ', ${PACKAGE_NAME}.__version__)"
+            fi
           else
             echo "${{ inputs.repository }}/${SMOKE_TEST_SCRIPT} found"
             export LD_LIBRARY_PATH="{LD_LIBRARY_PATH}:${{ inputs.repository }}/third_party/ffmpeg/lib"
@@ -154,7 +182,8 @@ jobs:
           source "${BUILD_ENV_FILE}"
           ${CONDA_RUN} pip install awscli
           for pkg in dist/*; do
-            ${CONDA_RUN} aws s3 cp "$pkg" "s3://pytorch/whl/${CHANNEL}/${{ matrix.desired_cuda }}" --acl public-read
+            # PYTORCH_S3_BUCKET_PATH derived from pkg-helpers
+            ${CONDA_RUN} aws s3 cp "$pkg" "${PYTORCH_S3_BUCKET_PATH}" --acl public-read
           done
 
 concurrency:

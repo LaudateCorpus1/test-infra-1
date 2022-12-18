@@ -16,16 +16,18 @@ locals {
     var.tags,
   )
 
-  name_sg                                = var.overrides["name_sg"] == "" ? local.tags["Name"] : var.overrides["name_sg"]
-  name_runner                            = var.overrides["name_runner"] == "" ? local.tags["Name"] : var.overrides["name_runner"]
-  role_path                              = var.role_path == null ? "/${var.environment}/" : var.role_path
+  datetime_deploy                        = formatdate("YYYYMMDDhhmmss", timestamp())
   instance_profile_path                  = var.instance_profile_path == null ? "/${var.environment}/" : var.instance_profile_path
   lambda_zip                             = var.lambda_zip == null ? "${path.module}/lambdas/runners/runners.zip" : var.lambda_zip
-  userdata_template                      = var.userdata_template == null ? "${path.module}/templates/user-data.sh" : var.userdata_template
-  userdata_template_windows              = "${path.module}/templates/user-data.ps1"
+  name_runner                            = var.overrides["name_runner"] == "" ? local.tags["Name"] : var.overrides["name_runner"]
+  name_sg                                = var.overrides["name_sg"] == "" ? local.tags["Name"] : var.overrides["name_sg"]
+  role_path                              = var.role_path == null ? "/${var.environment}/" : var.role_path
   userdata_arm_patch                     = "${path.module}/templates/arm-runner-patch.tpl"
   userdata_install_config_runner_linux   = "${path.module}/templates/install-config-runner.sh"
   userdata_install_config_runner_windows = "${path.module}/templates/install-config-runner.ps1"
+  userdata_template                      = var.userdata_template == null ? "${path.module}/templates/user-data.sh" : var.userdata_template
+  userdata_template_windows              = "${path.module}/templates/user-data.ps1"
+  vpc_id_to_idx                          = {for idx, vpc in var.vpc_ids: vpc.vpc => idx}
 }
 
 data "aws_ami" "runner_ami_linux" {
@@ -39,7 +41,7 @@ data "aws_ami" "runner_ami_linux" {
     }
   }
 
-  owners = var.ami_owners
+  owners = var.ami_owners_linux
 }
 
 data "aws_ami" "runner_ami_windows" {
@@ -53,7 +55,7 @@ data "aws_ami" "runner_ami_windows" {
     }
   }
 
-  owners = var.ami_owners
+  owners = var.ami_owners_windows
 }
 
 resource "aws_launch_template" "linux_runner" {
@@ -95,6 +97,52 @@ resource "aws_launch_template" "linux_runner" {
     post_install                    = var.userdata_post_install
     enable_cloudwatch_agent         = var.enable_cloudwatch_agent
     ssm_key_cloudwatch_agent_config = var.enable_cloudwatch_agent ? aws_ssm_parameter.cloudwatch_agent_config_runner_linux[0].name : ""
+    ghes_url                        = var.ghes_url
+    install_config_runner           = local.install_config_runner_linux
+  }))
+
+  tags = local.tags
+}
+
+resource "aws_launch_template" "linux_runner_nvidia" {
+  name = "${var.environment}-action-linux-runner-nvidia"
+
+  iam_instance_profile {
+    name = aws_iam_instance_profile.runner.name
+  }
+
+  instance_initiated_shutdown_behavior = "terminate"
+
+  image_id      = data.aws_ami.runner_ami_linux.id
+  instance_type = var.instance_type
+  key_name      = var.key_name
+
+  tag_specifications {
+    resource_type = "instance"
+    tags = merge(
+      local.tags,
+      {
+        "Name" = format("%s", local.name_runner)
+      },
+    )
+  }
+
+  tag_specifications {
+    resource_type = "volume"
+    tags = merge(
+      local.tags,
+      {
+        "Name" = format("%s", local.name_runner)
+      },
+    )
+  }
+
+  user_data = base64encode(templatefile(local.userdata_template, {
+    environment                     = var.environment
+    pre_install                     = var.userdata_pre_install
+    post_install                    = var.userdata_post_install
+    enable_cloudwatch_agent         = var.enable_cloudwatch_agent
+    ssm_key_cloudwatch_agent_config = var.enable_cloudwatch_agent ? aws_ssm_parameter.cloudwatch_agent_config_runner_linux_nvidia[0].name : ""
     ghes_url                        = var.ghes_url
     install_config_runner           = local.install_config_runner_linux
   }))
@@ -179,11 +227,11 @@ locals {
   })
 }
 
-resource "aws_security_group" "runner_sg" {
-  name_prefix = "${var.environment}-github-actions-runner-sg"
+resource "aws_security_group" "runners_sg" {
+  count       = length(var.vpc_ids)
+  name_prefix = "${var.environment}-github-actions-runner-sg-${count.index}"
   description = "Github Actions Runner security group"
-
-  vpc_id = var.vpc_id
+  vpc_id      = element(var.vpc_ids, count.index).vpc
 
   egress {
     from_port   = 0

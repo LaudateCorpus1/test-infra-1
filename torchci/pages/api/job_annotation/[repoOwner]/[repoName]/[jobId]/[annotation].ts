@@ -6,11 +6,12 @@ import { authOptions } from "pages/api/auth/[...nextauth]";
 // Get number by going to https://api.github.com/users/<username>
 // and copying the "id" field
 export const annotationEditAllowlist = new Set([
-  "34172846", // ZainRizvi
+  "4468967", // ZainRizvi
   "44682903", // clee2000
   "475357", // huydhn
   "420184", // kit1980
   "2453524", // malfet
+  "1617424", // suo
 ]);
 
 export default async function handler(
