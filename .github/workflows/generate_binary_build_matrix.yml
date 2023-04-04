@@ -27,8 +27,8 @@ on:
         description: "Build with Cuda?"
         default: "enable"
         type: string
-      with-py311:
-        description: "Include Python 3.11"
+      limit-win-builds:
+        description: "Limit windows builds to single python/cuda config"
         default: "disable"
         type: string
     outputs:
@@ -50,6 +50,7 @@ jobs:
         with:
           repository: ${{ inputs.test-infra-repository }}
           ref: ${{ inputs.test-infra-ref }}
+      - uses: ./.github/actions/set-channel
       - name: Generate test matrix
         id: generate
         env:
@@ -57,7 +58,7 @@ jobs:
           OS: ${{ inputs.os }}
           CHANNEL: ${{ inputs.channel }}
           WITH_CUDA: ${{ inputs.with-cuda }}
-          WITH_PY311: ${{ inputs.with-py311 }}
+          LIMIT_WIN_BUILDS: ${{ inputs.limit-win-builds }}
         run: |
           set -eou pipefail
           MATRIX_BLOB="$(python3 tools/scripts/generate_binary_build_matrix.py)"

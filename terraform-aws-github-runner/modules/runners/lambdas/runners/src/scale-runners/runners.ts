@@ -27,6 +27,7 @@ export interface RunnerType {
   disk_size: number;
   runnerTypeName: string;
   is_ephemeral: boolean;
+  ami?: string;
 }
 
 export interface DescribeInstancesResultRegion {
@@ -109,6 +110,7 @@ export async function listRunners(
               org: instance.Tags?.find((e) => e.Key === 'Org')?.Value,
               repo: instance.Tags?.find((e) => e.Key === 'Repo')?.Value,
               runnerType: instance.Tags?.find((e) => e.Key === 'RunnerType')?.Value,
+              instanceManagement: instance.Tags?.find((e) => e.Key == 'InstanceManagement')?.Value,
             })) ?? []
           );
         }) ?? []
@@ -291,6 +293,7 @@ export async function createRunner(runnerParameters: RunnerInputParameters, metr
       { Key: 'Application', Value: 'github-action-runner' },
       { Key: 'RunnerType', Value: runnerParameters.runnerType.runnerTypeName },
     ];
+    /* istanbul ignore next */
     if (Config.Instance.datetimeDeploy) {
       tags.push({ Key: 'ApplicationDeployDatetime', Value: Config.Instance.datetimeDeploy });
     }
@@ -328,42 +331,44 @@ export async function createRunner(runnerParameters: RunnerInputParameters, metr
                 metrics.ec2RunInstancesAWSCallSuccess,
                 metrics.ec2RunInstancesAWSCallFailure,
                 () => {
-                  return ec2
-                    .runInstances({
-                      MaxCount: 1,
-                      MinCount: 1,
-                      LaunchTemplate: {
-                        LaunchTemplateName: launchTemplateName,
-                        Version: launchTemplateVersion,
+                  const params: EC2.RunInstancesRequest = {
+                    MaxCount: 1,
+                    MinCount: 1,
+                    LaunchTemplate: {
+                      LaunchTemplateName: launchTemplateName,
+                      Version: launchTemplateVersion,
+                    },
+                    InstanceType: runnerParameters.runnerType.instance_type,
+                    BlockDeviceMappings: [
+                      {
+                        DeviceName: storageDeviceName,
+                        Ebs: {
+                          VolumeSize: runnerParameters.runnerType.disk_size,
+                          VolumeType: 'gp3',
+                          Encrypted: true,
+                          DeleteOnTermination: true,
+                        },
                       },
-                      InstanceType: runnerParameters.runnerType.instance_type,
-                      BlockDeviceMappings: [
-                        {
-                          DeviceName: storageDeviceName,
-                          Ebs: {
-                            VolumeSize: runnerParameters.runnerType.disk_size,
-                            VolumeType: 'gp3',
-                            Encrypted: true,
-                            DeleteOnTermination: true,
-                          },
-                        },
-                      ],
-                      NetworkInterfaces: [
-                        {
-                          AssociatePublicIpAddress: true,
-                          SubnetId: subnet,
-                          Groups: securityGroupIds,
-                          DeviceIndex: 0,
-                        },
-                      ],
-                      TagSpecifications: [
-                        {
-                          ResourceType: 'instance',
-                          Tags: tags,
-                        },
-                      ],
-                    })
-                    .promise();
+                    ],
+                    NetworkInterfaces: [
+                      {
+                        AssociatePublicIpAddress: true,
+                        SubnetId: subnet,
+                        Groups: securityGroupIds,
+                        DeviceIndex: 0,
+                      },
+                    ],
+                    TagSpecifications: [
+                      {
+                        ResourceType: 'instance',
+                        Tags: tags,
+                      },
+                    ],
+                  };
+                  if (runnerParameters.runnerType.ami) {
+                    params.ImageId = runnerParameters.runnerType.ami;
+                  }
+                  return ec2.runInstances(params).promise();
                 },
               );
             });

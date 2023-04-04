@@ -1,5 +1,5 @@
 import { Context, Probot } from "probot";
-import { isPyTorchPyTorch } from "./utils";
+import { CachedConfigTracker, isPyTorchPyTorch } from "./utils";
 
 function isCIFlowLabel(label: string): boolean {
   return label.startsWith("ciflow/") || label.startsWith("ci/");
@@ -121,7 +121,10 @@ async function handleClosedEvent(context: Context<"pull_request.closed">) {
 }
 
 // Add the tag corresponding to the new label.
-async function handleLabelEvent(context: Context<"pull_request.labeled">) {
+async function handleLabelEvent(
+  context: Context<"pull_request.labeled">,
+  tracker: CachedConfigTracker
+) {
   context.log.debug("START Processing label event");
   if (context.payload.pull_request.state === "closed") {
     // Ignore closed PRs. If this PR is reopened, the tags will get pushed as
@@ -133,85 +136,32 @@ async function handleLabelEvent(context: Context<"pull_request.labeled">) {
   if (!isCIFlowLabel(label)) {
     return;
   }
-
-  // collected from .github/workflows/*
-  const valid_labels = [
-    "ciflow/trunk",
-    "ciflow/periodic",
-    "ciflow/android",
-    "ciflow/binaries",
-    "ciflow/inductor",
-    "ciflow/mps",
-    "ciflow/nightly",
-    "ciflow/binaries_conda",
-    "ciflow/binaries_libtorch",
-    "ciflow/binaries_wheel",
-  ];
-
-  // The following labels control the test subsets we want to run,
-  // so their names are the same as shard names
-  const valid_test_config_labels = [
-    "ciflow/backwards_compat",
-    "ciflow/crossref",
-    "ciflow/default",
-    "ciflow/deploy",
-    "ciflow/distributed",
-    "ciflow/docs_tests",
-    "ciflow/dynamo",
-    "ciflow/force_on_cpu",
-    "ciflow/functorch",
-    "ciflow/jit_legacy",
-    "ciflow/multigpu",
-    "ciflow/nogpu_AVX512",
-    "ciflow/nogpu_NO_AVX2",
-    "ciflow/slow",
-    "ciflow/xla",
-  ];
-
-  if (!valid_labels.includes(label) && !valid_test_config_labels.includes(label)) {
-    let body;
-    if (label === "ciflow/all") {
-      body =
-        "The `ciflow/all` label was recently removed. It ran very expensive periodic CI jobs when most contributors ";
-      body +=
-        "did not need them. If you just want to check that you won't be reverted, use `ciflow/trunk`. ";
-      body +=
-        "If you *really* want the old `ciflow/all` behavior, add `ciflow/trunk` and `ciflow/periodic`.";
-    } else {
-      body = `We have recently simplified the CIFlow labels and \`${label}\` is no longer in use.\n`;
-    }
-    body += "You can use any of the following\n";
-    body +=
-      "- `ciflow/trunk` (`.github/workflows/trunk.yml`): all jobs we run per-commit on master\n";
-    body +=
-      "- `ciflow/periodic` (`.github/workflows/periodic.yml`): all jobs we run periodically on master\n";
-    body +=
-      "- `ciflow/android` (`.github/workflows/run_android_tests.yml`): android build and test\n";
-    body +=
-      "- `ciflow/nightly` (`.github/workflows/nightly.yml`): all jobs we run nightly\n";
-    body += "- `ciflow/binaries`: all binary build and upload jobs\n";
-    body +=
-      " - `ciflow/binaries_conda`: binary build and upload job for conda\n";
-    body +=
-      " - `ciflow/binaries_libtorch`: binary build and upload job for libtorch\n";
-    body += " - `ciflow/binaries_wheel`: binary build and upload job for wheel\n";
-    body += "In addition, you can use the following labels to select the test subsets to run: ";
-    body += valid_test_config_labels.join(", ");
+  const config: any = await tracker.loadConfig(context);
+  const valid_labels: Array<string> =
+    config !== null ? config["ciflow_push_tags"] : null;
+  if (valid_labels == null) {
     await context.octokit.issues.createComment(
       context.repo({
-        body,
+        body: "No ciflow labels are configured for this repo.\n" +
+              "For information on how to enable CIFlow bot see " +
+              "this [wiki]( https://github.com/pytorch/test-infra/wiki/PyTorch-bot#ciflow-bot)",
         issue_number: context.payload.pull_request.number,
       })
     );
     return;
   }
 
-  // TODO: Convert the test config label to tag is not yet supported and could
-  // only be done once we refactor the current workflows to support smaller
-  // workflow granularity per test config. After that, we can remove this check
-  // and do the same for these ciflow test config labels as what we are currently
-  // doing with ciflow/trunk, ciflow/periodic, and others
-  if (valid_test_config_labels.includes(label)) {
+  if (!valid_labels.includes(label)) {
+    let body = `Unknown label \`${label}\`.\n Currently recognized labels are\n`;
+    valid_labels.forEach((l: string) => {
+      body += ` - \`${l}\`\n`;
+    });
+    await context.octokit.issues.createComment(
+      context.repo({
+        body,
+        issue_number: context.payload.pull_request.number,
+      })
+    );
     return;
   }
 
@@ -228,7 +178,10 @@ async function handleLabelEvent(context: Context<"pull_request.labeled">) {
 }
 
 export default function ciflowPushTrigger(app: Probot) {
-  app.on("pull_request.labeled", handleLabelEvent);
+  const tracker = new CachedConfigTracker(app);
+  app.on("pull_request.labeled", async (context) => {
+    await handleLabelEvent(context, tracker);
+  });
   app.on(
     [
       "pull_request.synchronize",

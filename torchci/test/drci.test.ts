@@ -1,8 +1,9 @@
 import nock from "nock";
 import * as updateDrciBot from "../pages/api/drci/drci";
-import { OH_URL, DOCS_URL, DRCI_COMMENT_START, formDrciComment, getActiveSEVs, formDrciSevBody } from "lib/drciUtils";
+import { OH_URL, DOCS_URL, DRCI_COMMENT_START, formDrciComment, formDrciHeader, getActiveSEVs, formDrciSevBody } from "lib/drciUtils";
 import { IssueData } from "lib/types";
 import { testOctokit } from "./utils";
+import dayjs from "dayjs";
 
 nock.disableNetConnect();
 
@@ -89,7 +90,8 @@ const sev : IssueData= {
   title: "docker pulls failing with no space left on disk",
   html_url: "https://github.com/pytorch/pytorch/issues/85362",
   state: "open",
-  body: "random stuff"
+  body: "random stuff",
+  updated_at: dayjs().toString(),
 };
 
 const mergeBlockingSev : IssueData= {
@@ -97,7 +99,8 @@ const mergeBlockingSev : IssueData= {
   title: "Linux CUDA builds are failing due to missing deps",
   html_url: "https://github.com/pytorch/pytorch/issues/74967",
   state: "open",
-  body: "merge blocking"
+  body: "merge blocking",
+  updated_at: dayjs().toString(),
 };
 
 const closedSev : IssueData= {
@@ -105,7 +108,8 @@ const closedSev : IssueData= {
   title: "GitHub Outage: No Github Actions workflows can be run",
   html_url: "https://github.com/pytorch/pytorch/issues/74304",
   state: "closed",
-  body: "random stuff"
+  body: "random stuff",
+  updated_at: dayjs().toString(),
 };
 
 describe("Update Dr. CI Bot Unit Tests", () => {
@@ -140,15 +144,16 @@ describe("Update Dr. CI Bot Unit Tests", () => {
         [],
         [],
         pr_1001.head_sha,
-        "random sha"
+        "random sha",
+        "hudlink"
       );
       const failedJobName = failedA.name;
 
       expect(failureInfo.includes("3 Failures, 1 Pending")).toBeTruthy();
       expect(failureInfo.includes(failedJobName)).toBeTruthy();
-      const expectedFailureOrder = `* [Lint](a)
-* [something](a)
-* [z-docs / build-docs (cpp)](a)`;
+      const expectedFailureOrder = `* [Lint](hudlink#1) ([gh](a))
+* [something](hudlink#1) ([gh](a))
+* [z-docs / build-docs (cpp)](hudlink#1) ([gh](a))`;
       expect(failureInfo.includes(expectedFailureOrder)).toBeTruthy();
     });
 
@@ -224,9 +229,10 @@ describe("Update Dr. CI Bot Unit Tests", () => {
         [],
         [],
         pr_1001.head_sha,
-        "random sha"
+        "random sha",
+        "hudlink"
       );
-      const comment = formDrciComment(1001, failureInfo);
+      const comment = formDrciComment(1001, 'pytorch', 'pytorch', failureInfo);
       expect(comment.includes("1 Failures, 1 Pending")).toBeTruthy();
       expect(comment.includes("Helpful Links")).toBeTruthy();
       expect(
@@ -270,10 +276,13 @@ describe("Update Dr. CI Bot Unit Tests", () => {
         [],
         [],
         pr_1001.head_sha,
-        "random sha"
+        "random sha",
+        "hudlink"
       );
       const comment = formDrciComment(
         1001,
+        'pytorch',
+        'pytorch',
         failureInfo,
         formDrciSevBody(getActiveSEVs([sev, mergeBlockingSev]))
       );
@@ -306,9 +315,10 @@ describe("Update Dr. CI Bot Unit Tests", () => {
         [],
         [],
         pr_1001.head_sha,
-        "random sha"
+        "random sha",
+        "hudlink"
       );
-      const comment = formDrciComment(1001, failureInfo);
+      const comment = formDrciComment(1001, 'pytorch', 'pytorch', failureInfo);
       expect(comment.includes("## :link: Helpful Links")).toBeTruthy();
       expect(
         comment.includes("## :hourglass_flowing_sand: No Failures, 1 Pending")
@@ -339,9 +349,10 @@ describe("Update Dr. CI Bot Unit Tests", () => {
         [],
         [],
         pr_1001.head_sha,
-        "random sha"
+        "random sha",
+        "hudlink"
       );
-      const comment = formDrciComment(1001, failureInfo);
+      const comment = formDrciComment(1001, 'pytorch', 'pytorch', failureInfo);
       expect(comment.includes("## :link: Helpful Links")).toBeTruthy();
       expect(comment.includes("## :x: 1 Failures, 1 Pending")).toBeTruthy();
     });
@@ -370,7 +381,8 @@ describe("Update Dr. CI Bot Unit Tests", () => {
         [failedB],
         [failedC],
         "random head sha",
-        "random base sha"
+        "random base sha",
+        "hudlink"
       );
       const expectToContain = [
         "3 Failures, 1 Pending",
@@ -383,4 +395,22 @@ describe("Update Dr. CI Bot Unit Tests", () => {
       ];
       expect(expectToContain.every((s) => failureInfoComment.includes(s))).toBeTruthy();;
     });
+
+    test("test formDrciHeader for pytorch/pytorch", async () => {
+        const header = formDrciHeader("pytorch", "pytorch", 42)
+
+        expect(header.includes("hud.pytorch.org/pr/42")).toBeTruthy();
+        expect(header.includes("Python docs built from this PR")).toBeTruthy();
+        expect(header.includes("C++ docs built from this PR")).toBeTruthy();
+        expect(header.includes("bot commands wiki")).toBeTruthy();
+    })
+
+    test("test formDrciHeader for pytorch/vision", async () => {
+        const header = formDrciHeader("pytorch", "vision", 42)
+
+        expect(header.includes("hud.pytorch.org/pr/pytorch/vision/42")).toBeTruthy();
+        expect(header.includes("Python docs built from this PR")).toBeTruthy();
+        expect(header.includes("C++ docs built from this PR")).toBeFalsy();
+        expect(header.includes("bot commands wiki")).toBeFalsy();
+    })
 });

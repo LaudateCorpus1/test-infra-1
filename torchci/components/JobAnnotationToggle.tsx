@@ -1,27 +1,22 @@
 import React from "react";
-import { JobData } from "../lib/types";
+import { JobData, JobAnnotation } from "../lib/types";
 import { ToggleButtonGroup, ToggleButton } from "@mui/material";
 import { useSession } from "next-auth/react";
 
-export enum JobAnnotation {
-  NULL = "None",
-  BROKEN_TRUNK = "Broken Trunk",
-  TEST_FLAKE = "Test Flake",
-  INFRA_BROKEN = "Broken Infra",
-  INFRA_FLAKE = "Infra Flake",
-  NETWORK = "Network Error",
-  OTHER = "Other"
-}
-
 export default function JobAnnotationToggle({
   job,
+  similarJobs,
   annotation,
   repo = null,
 }: {
   job: JobData;
+  similarJobs?: JobData[] | null;
   annotation: JobAnnotation;
   repo?: string | null;
 }) {
+  const allJobs = (similarJobs ?? []);
+  allJobs.push(job);
+
   const [state, setState] = React.useState<JobAnnotation>(
     (annotation ?? "null") as JobAnnotation
   );
@@ -32,9 +27,12 @@ export default function JobAnnotationToggle({
   ) {
     setState(newState);
     await fetch(
-      `/api/job_annotation/${repo ?? job.repo}/${job.id}/${newState}`,
+      `/api/job_annotation/${repo ?? job.repo}/${newState}`,
       {
         method: "POST",
+        // Also send over the list of similar jobs so that they can be annotated
+        // in one API call
+        body: JSON.stringify(allJobs.map((job) => job.id)),
       }
     );
   }

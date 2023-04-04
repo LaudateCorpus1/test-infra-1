@@ -75,6 +75,21 @@ function NavBar() {
               </Link>
             </li>
             <li>
+              <Link prefetch={false} href="/reliability">
+                Failures Metric
+              </Link>
+            </li>
+            <li>
+              <Link prefetch={false} href="/failedjobs/pytorch/pytorch/master">
+                Failures Classfier
+              </Link>
+            </li>
+            <li>
+              <Link prefetch={false} href="/benchmark/compilers">
+                TorchInductor
+              </Link>
+            </li>
+            <li>
               <span style={{ cursor: "pointer" }}>
                 <Link
                   href="https://github.com/pytorch/test-infra/tree/main/torchci"

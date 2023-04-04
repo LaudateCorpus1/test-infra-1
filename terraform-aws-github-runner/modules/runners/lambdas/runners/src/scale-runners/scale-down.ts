@@ -14,8 +14,7 @@ import {
 } from './gh-runners';
 import { ScaleDownMetrics, sendMetricsAtTimeout, sendMetricsTimeoutVars } from './metrics';
 import { listRunners, resetRunnersCaches, terminateRunner } from './runners';
-import { getRepo, groupBy, Repo, RunnerInfo } from './utils';
-import { RequestError } from '@octokit/request-error';
+import { getRepo, groupBy, Repo, RunnerInfo, isGHRateLimitError, shuffleArrayInPlace } from './utils';
 
 export async function scaleDown(): Promise<void> {
   const metrics = new ScaleDownMetrics();
@@ -30,7 +29,7 @@ export async function scaleDown(): Promise<void> {
   try {
     // Ensure a clean cache before attempting each scale down event
     resetRunnersCaches();
-    resetGHRunnersCaches();
+    await resetGHRunnersCaches();
     resetSecretCache();
 
     metrics.run();
@@ -48,7 +47,7 @@ export async function scaleDown(): Promise<void> {
       return;
     }
 
-    for (const [runnerType, runners] of runnersDict.entries()) {
+    for (const [runnerType, runners] of shuffleArrayInPlace(Array.from(runnersDict.entries()))) {
       if (runners.length < 1 || runners[0].runnerType === undefined || runnerType === undefined) continue;
 
       const ghRunnersRemovable: Array<[RunnerInfo, GhRunner | undefined]> = [];
@@ -81,6 +80,10 @@ export async function scaleDown(): Promise<void> {
               }
             }
           }
+        } else {
+          // This is mostly designed to send metrics and statistics for pet instances that don't have clear
+          // ownership.
+          metrics.runnerFound(ec2runner);
         }
       }
 
@@ -157,7 +160,9 @@ export async function scaleDown(): Promise<void> {
             await terminateRunner(ec2runner, metrics);
             metrics.runnerTerminateSuccess(ec2runner);
           } catch (e) {
+            /* istanbul ignore next */
             metrics.runnerTerminateFailure(ec2runner);
+            /* istanbul ignore next */
             console.error(`Runner '${ec2runner.instanceId}' [${ec2runner.runnerType}] cannot be removed: ${e}`);
           }
         } else {
@@ -166,26 +171,16 @@ export async function scaleDown(): Promise<void> {
       }
     }
   } catch (e) {
+    /* istanbul ignore next */
     metrics.exception();
+    /* istanbul ignore next */
     throw e;
   } finally {
     clearTimeout(sndMetricsTimout.setTimeout);
     sndMetricsTimout.metrics = undefined;
     sndMetricsTimout.setTimeout = undefined;
-    metrics.sendMetrics();
+    await metrics.sendMetrics();
   }
-}
-
-/**
- * Returns true if the argument `e` is an octokit RequestError
- * from the 'API rate limit exceeded' exception.
- * @param e any error type
- * @return true if the argument is 'API rate limit exceeded' exception, false otherwise.
- */
-function isRateLimitError(e: unknown) {
-  const requestErr = e as RequestError | null;
-  const headers = requestErr?.headers || requestErr?.response?.headers;
-  return requestErr?.status === 403 && headers?.['x-ratelimit-remaining'] === '0';
 }
 
 export async function getGHRunnerOrg(ec2runner: RunnerInfo, metrics: ScaleDownMetrics): Promise<GhRunner | undefined> {
@@ -197,7 +192,7 @@ export async function getGHRunnerOrg(ec2runner: RunnerInfo, metrics: ScaleDownMe
     ghRunner = ghRunners.find((runner) => runner.name === ec2runner.instanceId);
   } catch (e) {
     console.warn('Failed to list active gh runners', e);
-    if (isRateLimitError(e)) {
+    if (isGHRateLimitError(e)) {
       throw e;
     }
   }
@@ -215,7 +210,7 @@ export async function getGHRunnerOrg(ec2runner: RunnerInfo, metrics: ScaleDownMe
           `listGithubRunnersOrg call: ${e}`,
       );
       /* istanbul ignore next */
-      if (isRateLimitError(e)) {
+      if (isGHRateLimitError(e)) {
         throw e;
       }
     }
@@ -242,7 +237,7 @@ export async function getGHRunnerRepo(ec2runner: RunnerInfo, metrics: ScaleDownM
   } catch (e) {
     console.warn('Failed to list active gh runners', e);
     /* istanbul ignore next */
-    if (isRateLimitError(e)) {
+    if (isGHRateLimitError(e)) {
       throw e;
     }
   }
@@ -259,7 +254,7 @@ export async function getGHRunnerRepo(ec2runner: RunnerInfo, metrics: ScaleDownM
         `Runner '${ec2runner.instanceId}' [${ec2runner.runnerType}](${repo}) error when getRunnerRepo call: ${e}`,
       );
       /* istanbul ignore next */
-      if (isRateLimitError(e)) {
+      if (isGHRateLimitError(e)) {
         throw e;
       }
     }
@@ -301,6 +296,10 @@ export function isRunnerRemovable(
   ec2runner: RunnerInfo,
   metrics: ScaleDownMetrics,
 ): boolean {
+  /* istanbul ignore next */
+  if (ec2runner.instanceManagement?.toLowerCase() === 'pet') {
+    return false;
+  }
   if (ghRunner !== undefined && ghRunner.busy) {
     return false;
   }
