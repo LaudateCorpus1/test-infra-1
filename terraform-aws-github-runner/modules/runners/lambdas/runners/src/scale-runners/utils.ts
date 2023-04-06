@@ -1,3 +1,5 @@
+import { RequestError } from '@octokit/request-error';
+
 export interface Repo {
   owner: string;
   repo: string;
@@ -13,10 +15,17 @@ export interface RunnerInfo {
   org?: string;
   repo?: string;
   runnerType?: string;
+  instanceManagement?: string;
 }
 
 export function getRepoKey(repo: Repo): string {
   return `${repo.owner}/${repo.repo}`;
+}
+
+export function isGHRateLimitError(e: unknown) {
+  const requestErr = e as RequestError | null;
+  const headers = requestErr?.headers || requestErr?.response?.headers;
+  return requestErr?.status === 403 && headers?.['x-ratelimit-remaining'] === '0';
 }
 
 export function getBoolean(value: string | number | undefined | boolean, defaultVal = false): boolean {
@@ -62,7 +71,7 @@ export async function expBackOff<T>(
     try {
       return await callback();
     } catch (e) {
-      if (`${e}`.includes('RequestLimitExceeded') || `${e}`.includes('ThrottlingException')) {
+      if (`${e}`.includes('RequestLimitExceeded') || `${e}`.includes('ThrottlingException') || isGHRateLimitError(e)) {
         if (expBackOffMs > maxMs) {
           throw e;
         }
@@ -104,4 +113,42 @@ export function groupBy<T, V>(lst: T[], keyGetter: (itm: T) => V): Map<V, Array<
     }
   }
   return map;
+}
+
+export function getDelayWithJitter(delayBase: number, jitter: number) {
+  return Math.max(0, delayBase) * (1 + Math.random() * Math.max(0, jitter));
+}
+
+export function getDelayWithJitterRetryCount(retryCount: number, delayBase: number, jitter: number) {
+  return getDelayWithJitter(Math.max(0, delayBase) * Math.pow(2, Math.max(0, retryCount)), jitter);
+}
+
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+export function mapReplacer(key: string, value: any) {
+  if (value instanceof Map) {
+    return {
+      dataType: 'Map',
+      value: Array.from(value.entries()),
+    };
+  } else {
+    return value;
+  }
+}
+
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+export function mapReviver(key: string, value: any) {
+  if (typeof value === 'object' && value !== null) {
+    if (value.dataType === 'Map') {
+      return new Map(value.value);
+    }
+  }
+  return value;
+}
+
+export function shuffleArrayInPlace<T>(arr: T[]): T[] {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
 }

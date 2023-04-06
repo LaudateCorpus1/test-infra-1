@@ -13,6 +13,7 @@ import {
   packHudParams,
   RowData,
   TTSChange,
+  JobAnnotation,
 } from "lib/types";
 import useHudData from "lib/useHudData";
 import useScrollTo from "lib/useScrollTo";
@@ -29,9 +30,7 @@ import {
   useState,
 } from "react";
 import useSWR, { SWRConfig } from "swr";
-import JobAnnotationToggle, {
-  JobAnnotation,
-} from "components/JobAnnotationToggle";
+import JobAnnotationToggle from "components/JobAnnotationToggle";
 
 function includesCaseInsensitive(value: string, pattern: string): boolean {
   if (pattern === "") {
@@ -618,6 +617,10 @@ const ShowDurationContext = createContext<[boolean, (name: boolean) => void]>([
 export default function Page() {
   const router = useRouter();
   const params = packHudParams(router.query);
+  // Don't show rerun and unstable jobs
+  params.filter_reruns = true;
+  params.filter_unstable = true;
+
   const [jobFilter, setJobFilter] = useState<string | null>(null);
   const [jobHover, setJobHover] = useState<string | null>(null);
   const [showDurationInfo, setShowDurationInfo] = useState<boolean>(false);

@@ -34,7 +34,8 @@ export function seriesWithInterpolatedTimes(
   granularity: Granularity,
   groupByFieldName: string | undefined,
   timeFieldName: string,
-  yAxisFieldName: string
+  yAxisFieldName: string,
+  fillMissingData: boolean = true
 ) {
   // We want to interpolate the data, filling any "holes" in our time series
   // with 0.
@@ -70,7 +71,7 @@ export function seriesWithInterpolatedTimes(
     byGroup = _.groupBy(data, (d) => d[groupByFieldName]);
   }
 
-  return _.map(byGroup, (value, key) => {
+  const series = _.map(byGroup, (value, key) => {
     const byTime = _.keyBy(value, timeFieldName);
     // Roundtrip each timestamp to make the format uniform.
     const byTimeNormalized = _.mapKeys(byTime, (_, k) =>
@@ -82,7 +83,7 @@ export function seriesWithInterpolatedTimes(
       .map((t) => {
         const item = byTimeNormalized[t];
         if (item === undefined && granularity !== "minute") {
-          return [t, 0];
+          return fillMissingData ? [t, 0] : undefined;
         } else if (item === undefined) {
           return undefined;
         } else {
@@ -100,8 +101,10 @@ export function seriesWithInterpolatedTimes(
       emphasis: {
         focus: "series",
       },
+      smooth: true,
     };
   });
+  return _.sortBy(series, (x) => x.name);
 }
 
 export function TimeSeriesPanelWithData({

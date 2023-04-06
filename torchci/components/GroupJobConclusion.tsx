@@ -1,12 +1,18 @@
 import { getGroupConclusionChar } from "lib/JobClassifierUtil";
 import { GroupData, JobData } from "lib/types";
 import styles from "./JobConclusion.module.css";
+import hudStyles from "./hud.module.css";
 import TooltipTarget from "components/TooltipTarget";
 import { useContext } from "react";
 import {
   JobCell,
   PinnedTooltipContext,
 } from "pages/hud/[repoOwner]/[repoName]/[branch]/[[...page]]";
+import {
+  isFailedJob,
+  isRerunDisabledTestsJob,
+  isUnstableJob,
+} from "lib/jobUtils";
 
 export enum JobStatus {
   Success = "success",
@@ -25,6 +31,7 @@ export enum GroupedJobStatus {
   Success = "success",
   Classified = "classified",
   Flaky = "flaky",
+  WarningOnly = "warning",
 }
 
 export default function HudGroupedCell({
@@ -38,23 +45,27 @@ export default function HudGroupedCell({
   isExpanded: boolean;
   isClassified: boolean;
 }) {
+  const [pinnedId, setPinnedId] = useContext(PinnedTooltipContext);
+  const style = pinnedId.name == groupData.groupName ? hudStyles.highlight : "";
+
   const erroredJobs = [];
+  const warningOnlyJobs = [];
   const pendingJobs = [];
   const noStatusJobs = [];
   const failedPreviousRunJobs = [];
   for (const job of groupData.jobs) {
-    if (
-      job.conclusion === JobStatus.Failure ||
-      job.conclusion === JobStatus.Timed_out ||
-      job.conclusion === JobStatus.Cancelled
-    ) {
-      erroredJobs.push(job);
+    if (isFailedJob(job)) {
+      if (isRerunDisabledTestsJob(job) || isUnstableJob(job)) {
+        warningOnlyJobs.push(job);
+      } else {
+        erroredJobs.push(job);
+      }
     } else if (job.conclusion === JobStatus.Pending) {
       pendingJobs.push(job);
     } else if (job.conclusion === undefined) {
       noStatusJobs.push(job);
     } else if (job.conclusion === JobStatus.Success && job.failedPreviousRun) {
-      failedPreviousRunJobs.push(job)
+      failedPreviousRunJobs.push(job);
     }
   }
 
@@ -65,16 +76,18 @@ export default function HudGroupedCell({
     conclusion = GroupedJobStatus.Pending;
   } else if (failedPreviousRunJobs.length !== 0) {
     conclusion = GroupedJobStatus.Flaky;
+  } else if (!(warningOnlyJobs.length == 0)) {
+    conclusion = GroupedJobStatus.WarningOnly;
   } else if (noStatusJobs.length === groupData.jobs.length) {
     conclusion = GroupedJobStatus.AllNull;
   }
 
-  const [pinnedId, setPinnedId] = useContext(PinnedTooltipContext);
   return (
     <>
-      <td>
+      <td className={style}>
         <TooltipTarget
-          id={`${sha}-${groupData.groupName}`}
+          sha={sha}
+          name={groupData.groupName}
           pinnedId={pinnedId}
           setPinnedId={setPinnedId}
           tooltipContent={
@@ -94,7 +107,7 @@ export default function HudGroupedCell({
                   ? styles["classified"]
                   : styles[conclusion ?? "none"]
               }
-              style={{ border: "1px solid gainsboro" }}
+              style={{ border: "1px solid gainsboro", padding: "0 1px" }}
             >
               {getGroupConclusionChar(conclusion)}
             </span>

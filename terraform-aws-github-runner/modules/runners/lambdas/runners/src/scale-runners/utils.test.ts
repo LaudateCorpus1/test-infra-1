@@ -1,4 +1,13 @@
-import { getBoolean, getRepoKey, expBackOff, getRepo, groupBy } from './utils';
+import {
+  expBackOff,
+  getBoolean,
+  getDelayWithJitter,
+  getDelayWithJitterRetryCount,
+  getRepo,
+  getRepoKey,
+  groupBy,
+  shuffleArrayInPlace,
+} from './utils';
 import nock from 'nock';
 
 beforeEach(() => {
@@ -129,5 +138,125 @@ describe('./utils', () => {
         ),
       ).rejects.toThrow(msg);
     });
+  });
+
+  describe('getDelayWithJitter', () => {
+    it('have jitter == 0', () => {
+      expect(getDelayWithJitter(20, 0.0)).toEqual(20);
+      expect(getDelayWithJitter(0, 0.0)).toEqual(0);
+      expect(getDelayWithJitter(100, 0.0)).toEqual(100);
+      expect(getDelayWithJitter(100, -0.5)).toEqual(100);
+      expect(getDelayWithJitter(-100, 0.0)).toEqual(0);
+    });
+
+    it('jitter is in between bounds', () => {
+      const checks = 10000;
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitter(20, 0.1);
+        expect(r).toBeLessThanOrEqual(22);
+        expect(r).toBeGreaterThanOrEqual(18);
+      }
+
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitter(100, 0.5);
+        expect(r).toBeLessThanOrEqual(150);
+        expect(r).toBeGreaterThanOrEqual(50);
+      }
+
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitter(1000, 1.0);
+        expect(r).toBeLessThanOrEqual(2000);
+        expect(r).toBeGreaterThanOrEqual(0);
+      }
+
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitter(1000, 2.0);
+        expect(r).toBeLessThanOrEqual(3000);
+        expect(r).toBeGreaterThanOrEqual(0);
+      }
+    });
+  });
+
+  describe('getDelayWithJitter', () => {
+    it('have jitter == 0', () => {
+      expect(getDelayWithJitterRetryCount(0, 20, 0.0)).toEqual(20);
+      expect(getDelayWithJitterRetryCount(1, 20, 0.0)).toEqual(40);
+      expect(getDelayWithJitterRetryCount(2, 20, 0.0)).toEqual(80);
+      expect(getDelayWithJitterRetryCount(-1, 20, 0.0)).toEqual(20);
+
+      expect(getDelayWithJitterRetryCount(0, 0, 0.0)).toEqual(0);
+      expect(getDelayWithJitterRetryCount(1, 0, 0.0)).toEqual(0);
+      expect(getDelayWithJitterRetryCount(2, 0, 0.0)).toEqual(0);
+      expect(getDelayWithJitterRetryCount(-1, 0, 0.0)).toEqual(0);
+
+      expect(getDelayWithJitterRetryCount(0, 100, 0.0)).toEqual(100);
+      expect(getDelayWithJitterRetryCount(1, 100, 0.0)).toEqual(200);
+      expect(getDelayWithJitterRetryCount(2, 100, 0.0)).toEqual(400);
+      expect(getDelayWithJitterRetryCount(-1, 100, 0.0)).toEqual(100);
+
+      expect(getDelayWithJitterRetryCount(0, 100, -0.5)).toEqual(100);
+      expect(getDelayWithJitterRetryCount(1, 100, -0.5)).toEqual(200);
+      expect(getDelayWithJitterRetryCount(2, 100, -0.5)).toEqual(400);
+      expect(getDelayWithJitterRetryCount(-1, 100, -0.5)).toEqual(100);
+
+      expect(getDelayWithJitterRetryCount(0, -100, 0.0)).toEqual(0);
+      expect(getDelayWithJitterRetryCount(1, -100, 0.0)).toEqual(0);
+      expect(getDelayWithJitterRetryCount(2, -100, 0.0)).toEqual(0);
+      expect(getDelayWithJitterRetryCount(-1, -100, 0.0)).toEqual(0);
+    });
+
+    it('jitter is in between bounds', () => {
+      const checks = 10000;
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitterRetryCount(0, 20, 0.1);
+        expect(r).toBeLessThanOrEqual(22);
+        expect(r).toBeGreaterThanOrEqual(20);
+      }
+
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitterRetryCount(1, 20, 0.1);
+        expect(r).toBeLessThanOrEqual(44);
+        expect(r).toBeGreaterThanOrEqual(40);
+      }
+
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitterRetryCount(2, 20, 0.1);
+        expect(r).toBeLessThanOrEqual(88);
+        expect(r).toBeGreaterThanOrEqual(80);
+      }
+
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitterRetryCount(0, 100, 0.5);
+        expect(r).toBeLessThanOrEqual(150);
+        expect(r).toBeGreaterThanOrEqual(100);
+      }
+
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitterRetryCount(1, 1000, 1.0);
+        expect(r).toBeLessThanOrEqual(4000);
+        expect(r).toBeGreaterThanOrEqual(1000);
+      }
+
+      for (let i = 0; i < checks; i += 1) {
+        const r = getDelayWithJitterRetryCount(0, 1000, 2.0);
+        expect(r).toBeLessThanOrEqual(3000);
+        expect(r).toBeGreaterThanOrEqual(1000);
+      }
+    });
+  });
+});
+
+describe('shuffleArrayInPlace', () => {
+  it('empty array, is empty', () => {
+    expect(shuffleArrayInPlace([])).toEqual([]);
+  });
+
+  it('expects the array to be randomized, contain all items and be returned', () => {
+    const arr = Array.from(Array(10).keys());
+    const arrResult = shuffleArrayInPlace(arr);
+    expect(arrResult).toBe(arr);
+    for (const number of Array(10).keys()) {
+      expect(arr).toContain(number);
+    }
   });
 });

@@ -101,3 +101,16 @@
 .forcedMergeWarning {
   background-color: lightyellow;
 }
+
+.selectedRow {
+  background-color: lightblue;
+  font-weight: bold;
+}
+
+.center {
+  text-align: center;
+}
+
+.highlight {
+  background-color: #ffa;
+}

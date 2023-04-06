@@ -5,17 +5,25 @@ on:
     # Run every 15 minutes
     - cron: "*/15 * * * *"
   # Have the ability to trigger this job manually through the API (temporary)
-  workflow_dispatch:  
+  workflow_dispatch:
 
 jobs:
   update-drci-comments:
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Retrieve rockset query results and update Dr. CI comments
+      - name: Retrieve rockset query results and update Dr. CI comments for the PyTorch repo
         run: |
           curl --request POST \
           --url 'https://www.torch-ci.com/api/drci/drci' \
-          --header 'Authorization: ${{ secrets.DRCI_BOT_KEY }}'
+          --header 'Authorization: ${{ secrets.DRCI_BOT_KEY }}' \
+          --data 'repo=pytorch'
+
+      - name: Retrieve rockset query results and update Dr. CI comments for the Vision repo
+        run: |
+          curl --request POST \
+          --url 'https://www.torch-ci.com/api/drci/drci' \
+          --header 'Authorization: ${{ secrets.DRCI_BOT_KEY }}' \
+          --data 'repo=vision'

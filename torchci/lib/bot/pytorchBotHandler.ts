@@ -2,9 +2,16 @@ import { PullRequestReview } from "@octokit/webhooks-types";
 import _ from "lodash";
 import { updateDrciComments } from "pages/api/drci/drci";
 import shlex from "shlex";
-import { addLabels, hasWritePermissions as _hasWP, reactOnComment } from "./botUtils";
 import { getHelp, getParser } from "./cliParser";
 import PytorchBotLogger from "./pytorchbotLogger";
+import {
+  isPyTorchOrg,
+  isPyTorchPyTorch,
+  addLabels,
+  hasWritePermissions as _hasWP,
+  reactOnComment,
+  hasWorkflowRunningPermissions as _hasWRP,
+} from "./utils";
 
 export const CIFLOW_TRUNK_LABEL = "ciflow/trunk";
 
@@ -19,6 +26,11 @@ export interface PytorchbotParams {
   commentBody: string;
   useReactions: boolean;
 }
+
+const PR_COMMENTED = 'commented'
+const PR_DISMISSED = 'dismissed'
+const PR_CHANGES_REQUESTED = 'changes_requested'
+const PR_APPROVED = 'approved'
 
 class PytorchBotHandler {
   ctx: any;
@@ -141,20 +153,21 @@ The explanation needs to be clear on why this is needed. Here are some good exam
     return null;
   }
 
-  async doesHaveApprovedStatus() {
-    var res = await this.ctx.octokit.pulls.listReviews({
-      owner: this.owner,
-      repo: this.repo,
-      pull_number: this.prNum,
-    })
+  async getApprovalStatus(): Promise<string> {
+    var reviews: PullRequestReview[] = await this.ctx.octokit.paginate(
+      this.ctx.octokit.pulls.listReviews,
+      {
+        owner: this.owner,
+        repo: this.repo,
+        pull_number: this.prNum,
+      }
+    );
 
-    if (!res?.data?.length) {
+    if (!reviews.length) {
       this.ctx.log("Could not find any reviews for PR")
-      return false;
+      return "no_reviews";
     }
 
-    var reviews = res?.data
-        
     // From https://docs.github.com/en/graphql/reference/enums#commentauthorassociation
     const ALLOWED_APPROVER_ASSOCIATIONS = [
       "COLLABORATOR",
@@ -167,7 +180,7 @@ The explanation needs to be clear on why this is needed. Here are some good exam
     // But first sort them in case Github ever returns the list unsorted
     var latest_reviews: { [user: string]: string } = reviews
       .sort((a: PullRequestReview, b: PullRequestReview) => {
-        Date.parse(a.submitted_at + "") < Date.parse(b.submitted_at + "")
+         return Date.parse(a.submitted_at + "") < Date.parse(b.submitted_at + "") ? -1 : 1
       })
       .reduce((latest_reviews: { [user: string]: string }, curr_review: PullRequestReview) => {
         if (!ALLOWED_APPROVER_ASSOCIATIONS.includes(curr_review.author_association)) {
@@ -179,14 +192,14 @@ The explanation needs to be clear on why this is needed. Here are some good exam
         // returns upper case. We can't trust that to remain that way, so always conver the state
         // to lowercase before any comparisons
         switch(curr_review.state.toLocaleLowerCase()) {
-          case 'commented': // Ignore mere comments
-            break; 
-          case 'dismissed': // Ignore previous reviews by this person
+          case PR_COMMENTED: // Ignore mere comments
+            break;
+          case PR_DISMISSED: // Ignore previous reviews by this person
             delete latest_reviews[curr_review.user.login]
             break;
-          case 'changes_requested': 
-          case 'approved':
-            latest_reviews[curr_review.user.login] = curr_review.state; 
+          case PR_CHANGES_REQUESTED:
+          case PR_APPROVED:
+            latest_reviews[curr_review.user.login] = curr_review.state;
             break;
           default:
             this.ctx.log(`Found an invalid review state '${curr_review.state}' on review id ${curr_review.id}. See ${curr_review.html_url}`)
@@ -194,31 +207,26 @@ The explanation needs to be clear on why this is needed. Here are some good exam
 
         return latest_reviews;
       }, {})
-    
+
     // Aggregate the reviews to figure out the overall status.
-    // One approval is all that's needed, unless someone blocks it with a `changes_requested`
+    // One approval is all that's needed
     let approval_status = ""
     for (let [_, review_state] of Object.entries(latest_reviews)) {
-      if (approval_status.toLocaleLowerCase() !=  'changes_requested') {
+      if (review_state.toLocaleLowerCase() ==  PR_APPROVED) {
         approval_status = review_state
       }
     }
 
-    var result =  approval_status.toLocaleLowerCase() === 'approved'
-    console.debug(`Result was ${result}`)
-    return result;
+    return approval_status.toLocaleLowerCase();
   }
 
   async handleMerge(
     forceMessage: string,
-    mergeOnGreen: boolean,
-    landChecks: boolean,
+    ignore_current: boolean,
     rebase: string | boolean
   ) {
     const extra_data = {
       forceMessage,
-      mergeOnGreen,
-      landChecks,
       rebase,
     };
     const forceRequested = forceMessage != undefined;
@@ -226,10 +234,10 @@ The explanation needs to be clear on why this is needed. Here are some good exam
 
     if (forceRequested) {
       rejection_reason = await this.reasonToRejectForceRequest(forceMessage);
-    } else {
+    } else if (isPyTorchOrg(this.owner)) {
       // Ensure the PR has been signed off on
-      let isApprovedPR = await this.doesHaveApprovedStatus()
-      if (!isApprovedPR) {
+      let approval_status = await this.getApprovalStatus()
+      if (approval_status !== PR_APPROVED) {
         rejection_reason = "This PR needs to be approved by an authorized maintainer before merge."
       }
     }
@@ -242,18 +250,18 @@ The explanation needs to be clear on why this is needed. Here are some good exam
 
     if (
       rebase &&
-      !(await this.hasWritePermissions(
+      !(await this.hasWorkflowRunningPermissions(
         this.ctx.payload?.comment?.user?.login
       ))
     ) {
       await this.addComment(
-        "You don't have permissions to rebase this PR, only people with write permissions may rebase PRs."
-      );
+        "You don't have permissions to rebase this PR since you are a first time contributor.  If you think this is a mistake, please contact PyTorch Dev Infra."
+      )
       rebase = false;
     }
 
     await this.logger.log("merge", extra_data);
-    if (!forceRequested) {
+    if (!forceRequested && isPyTorchPyTorch(this.owner, this.repo)) {
       let labels: string[] = this.ctx.payload?.issue?.labels.map(
         (e: any) => e["name"]
       );
@@ -267,11 +275,10 @@ The explanation needs to be clear on why this is needed. Here are some good exam
         await addLabels(this.ctx, [CIFLOW_TRUNK_LABEL])
       }
     }
-    
+
     await this.dispatchEvent("try-merge", {
       force: forceRequested,
-      on_green: mergeOnGreen,
-      land_checks: landChecks,
+      ignore_current: ignore_current,
       rebase: rebase,
     });
     await this.ackComment();
@@ -286,12 +293,16 @@ The explanation needs to be clear on why this is needed. Here are some good exam
   async handleRebase(branch: string) {
     await this.logger.log("rebase", { branch });
     const { ctx } = this;
-    if (await this.hasWritePermissions(ctx.payload?.comment?.user?.login)) {
+    if (
+      await this.hasWorkflowRunningPermissions(
+        ctx.payload?.comment?.user?.login
+      )
+    ) {
       await this.dispatchEvent("try-rebase", { branch: branch });
       await this.ackComment();
     } else {
       await this.addComment(
-        "You don't have permissions to rebase this PR, only people with write permissions may rebase PRs."
+        "You don't have permissions to rebase this PR since you are a first time contributor.  If you think this is a mistake, please contact PyTorch Dev Infra."
       );
     }
   }
@@ -312,6 +323,10 @@ The explanation needs to be clear on why this is needed. Here are some good exam
     return _hasWP(this.ctx, username);
   }
 
+  async hasWorkflowRunningPermissions(username: string): Promise<boolean> {
+    return _hasWRP(this.ctx, username);
+  }
+
   async handleLabel(labels: string[]) {
     await this.logger.log("label", { labels });
     const { ctx } = this;
@@ -330,14 +345,16 @@ The explanation needs to be clear on why this is needed. Here are some good exam
     const ciflowLabels = labelsToAdd.filter((l: string) =>
       l.startsWith("ciflow/")
     );
-    const hasWritePermission = await this.hasWritePermissions(
-      ctx.payload?.comment?.user?.login
-    );
-    if (!hasWritePermission && ciflowLabels.length > 0) {
+    if (
+      ciflowLabels.length > 0 &&
+      !(await this.hasWorkflowRunningPermissions(
+        ctx.payload?.comment?.user?.login
+      ))
+    ) {
       return await this.addComment(
         "Can't add following labels to PR: " +
           ciflowLabels.join(", ") +
-          " Please ping one of the reviewers for help."
+          ". Please ping one of the reviewers for help."
       );
     }
     if (invalidLabels.length > 0) {
@@ -354,10 +371,10 @@ The explanation needs to be clear on why this is needed. Here are some good exam
 
   async handleDrCI() {
     await this.logger.log("Dr. CI");
-    const { ctx, prNum } = this;
+    const { ctx, prNum, repo } = this;
 
     await this.ackComment();
-    await updateDrciComments(ctx.octokit, prNum.toString());
+    await updateDrciComments(ctx.octokit, repo, prNum.toString());
   }
 
   async handlePytorchCommands(inputArgs: string) {
@@ -385,8 +402,7 @@ The explanation needs to be clear on why this is needed. Here are some good exam
       case "merge":
         return await this.handleMerge(
           args.force,
-          args.green,
-          args.land_checks,
+          args.ignore_current,
           args.rebase
         );
       case "rebase": {

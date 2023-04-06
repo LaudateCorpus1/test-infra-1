@@ -7,7 +7,7 @@ import { useState } from "react";
 const ROW_HEIGHT = 240;
 
 export default function Kpis() {
-    // Looking at data from the past 6 months
+    // Looking at data from the past six months
     const [startTime, setStartTime] = useState(dayjs().subtract(6, 'month'));
     const [stopTime, setStopTime] = useState(dayjs());
 
@@ -16,6 +16,20 @@ export default function Kpis() {
         name: "startTime",
         type: "string",
         value: startTime,
+        },
+        {
+        name: "stopTime",
+        type: "string",
+        value: stopTime,
+        },
+    ];
+
+    // deprecate this in Q3 2023
+    const contributionTimeParams: RocksetParam[] = [
+        {
+        name: "startTime",
+        type: "string",
+        value: "2022-07-03T00:00:00.000Z",
         },
         {
         name: "stopTime",
@@ -49,7 +63,7 @@ export default function Kpis() {
 
             <Grid item xs={12} lg={6} height={ROW_HEIGHT}>
                 <TimeSeriesPanel
-                title={"# of Reverts (Weekly)"}
+                title={"# of Reverts/week (2 week moving avg)"}
                 queryName={"num_reverts"}
                 queryCollection={"pytorch_dev_infra_kpis"}
                 queryParams={[
@@ -59,6 +73,7 @@ export default function Kpis() {
                 timeFieldName={"bucket"}
                 yAxisFieldName={"num"}
                 yAxisRenderer={(unit) => `${unit}`}
+                groupByFieldName={"code"}
                 />
             </Grid>
 
@@ -108,20 +123,30 @@ export default function Kpis() {
                 additionalOptions={{ yAxis: { max: 7 } }}
               />
             </Grid>
-            <Grid item xs={12} lg={6} height={ROW_HEIGHT}>
-              <TimeSeriesPanel
-                title={"viable/strict Lag (Per Commit)"}
-                queryName={"strict_lag_historical"}
-                queryCollection={"pytorch_dev_infra_kpis"}
-                queryParams={[...timeParams]}
-                granularity={"minute"}
-                timeFieldName={"push_time"}
-                yAxisFieldName={"diff_hr"}
-                yAxisLabel={"Hours"}
-                yAxisRenderer={(unit) => `${unit}`}
-                // the data is very variable, so set the y axis to be something that makes this chart a bit easier to read
-                additionalOptions={{ yAxis: { max: 7 } }}
-              />
+            <Grid item xs={6} height={ROW_HEIGHT}>
+                <TimeSeriesPanel
+                    title={"Weekly External PR Count (4 week moving average)"}
+                    queryName={"external_contribution_stats"}
+                    queryParams={[...contributionTimeParams]}
+                    granularity={"week"}
+                    timeFieldName={"granularity_bucket"}
+                    yAxisFieldName={"weekly_pr_count_rolling_average"}
+                    yAxisRenderer={(value) => value}
+                    additionalOptions={{ yAxis: { scale: true } }}
+                />
+            </Grid>
+
+            <Grid item xs={6} height={ROW_HEIGHT}>
+                <TimeSeriesPanel
+                    title={"Weekly Unique External Contributor Count (4 week moving average)"}
+                    queryName={"external_contribution_stats"}
+                    queryParams={[...contributionTimeParams]}
+                    granularity={"week"}
+                    timeFieldName={"granularity_bucket"}
+                    yAxisFieldName={"weekly_user_count_rolling_average"}
+                    yAxisRenderer={(value) => value}
+                    additionalOptions={{ yAxis: { scale: true } }}
+                />
             </Grid>
         </Grid>
     );
