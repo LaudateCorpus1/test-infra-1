@@ -22,10 +22,10 @@ import { isEqual } from "lodash";
 import { fetchJSON } from "lib/bot/utils";
 
 interface PRandJobs {
-    head_sha: string;
-    pr_number: number;
-    jobs: Map<string, RecentWorkflowsData>;
-    merge_base: string;
+  head_sha: string;
+  pr_number: number;
+  jobs: Map<string, RecentWorkflowsData>;
+  merge_base: string;
 }
 
 export interface FlakyRule {
@@ -34,71 +34,79 @@ export interface FlakyRule {
 }
 
 export interface UpdateCommentBody {
-    repo: string;
+  repo: string;
 }
 
 export default async function handler(
-    req: NextApiRequest,
-    res: NextApiResponse<void>
+  req: NextApiRequest,
+  res: NextApiResponse<void>
 ) {
-    const authorization = req.headers.authorization;
+  const authorization = req.headers.authorization;
 
-    if (authorization === process.env.DRCI_BOT_KEY) {
-        const { prNumber } = req.query;
-        const { repo }: UpdateCommentBody = req.body;
-        const octokit = await getOctokit(OWNER, repo);
-        updateDrciComments(octokit, repo, prNumber as string);
+  if (authorization === process.env.DRCI_BOT_KEY) {
+    const { prNumber } = req.query;
+    const { repo }: UpdateCommentBody = req.body;
+    const octokit = await getOctokit(OWNER, repo);
+    updateDrciComments(octokit, repo, prNumber as string);
 
-        res.status(200).end();
-    }
-    res.status(403).end();
+    res.status(200).end();
+  }
+  res.status(403).end();
 }
 
-export async function updateDrciComments(octokit: Octokit, repo: string = "pytorch", prNumber?: string) {
-    const recentWorkflows: RecentWorkflowsData[] = await fetchRecentWorkflows(
-        `${OWNER}/${repo}`,
-        prNumber,
-        NUM_MINUTES + ""
+export async function updateDrciComments(
+  octokit: Octokit,
+  repo: string = "pytorch",
+  prNumber?: string
+) {
+  const recentWorkflows: RecentWorkflowsData[] = await fetchRecentWorkflows(
+    `${OWNER}/${repo}`,
+    prNumber,
+    NUM_MINUTES + ""
+  );
+
+  const workflowsByPR = reorganizeWorkflows(recentWorkflows);
+  const head = get_head_branch(repo);
+  await addMergeBaseCommits(octokit, repo, head, workflowsByPR);
+  const sevs = getActiveSEVs(await fetchIssuesByLabel("ci: sev"));
+  const flakyRules: FlakyRule[] = (await fetchJSON(FLAKY_RULES_JSON)) || [];
+  const baseCommitJobs = await getBaseCommitJobs(workflowsByPR);
+
+  await forAllPRs(workflowsByPR, async (pr_info: PRandJobs) => {
+    const { pending, failedJobs, flakyJobs, brokenTrunkJobs, unstableJobs } =
+      getWorkflowJobsStatuses(
+        pr_info,
+        flakyRules,
+        baseCommitJobs.get(pr_info.merge_base) || new Map()
+      );
+
+    const failureInfo = constructResultsComment(
+      pending,
+      failedJobs,
+      flakyJobs,
+      brokenTrunkJobs,
+      unstableJobs,
+      pr_info.head_sha,
+      pr_info.merge_base,
+      `${HUD_URL}${OWNER}/${repo}/${pr_info.pr_number}`
     );
 
-    const workflowsByPR = reorganizeWorkflows(recentWorkflows);
-    const head = get_head_branch(repo);
-    await addMergeBaseCommits(octokit, repo, head, workflowsByPR);
-    const sevs = getActiveSEVs(await fetchIssuesByLabel("ci: sev"));
-    const flakyRules: FlakyRule[] = await fetchJSON(FLAKY_RULES_JSON) || [];
-    const baseCommitJobs = await getBaseCommitJobs(workflowsByPR);
+    const comment = formDrciComment(
+      pr_info.pr_number,
+      OWNER,
+      repo,
+      failureInfo,
+      formDrciSevBody(sevs)
+    );
 
-    await forAllPRs(workflowsByPR, async (pr_info: PRandJobs) => {
-      const { pending, failedJobs, flakyJobs, brokenTrunkJobs } =
-        getWorkflowJobsStatuses(
-          pr_info,
-          flakyRules,
-          baseCommitJobs.get(pr_info.merge_base) || new Map()
-        );
-
-      const failureInfo = constructResultsComment(
-        pending,
-        failedJobs,
-        flakyJobs,
-        brokenTrunkJobs,
-        pr_info.head_sha,
-        pr_info.merge_base,
-        `${HUD_URL}${OWNER}/${repo}/${pr_info.pr_number}`
-      );
-
-      const comment = formDrciComment(
-        pr_info.pr_number,
-        OWNER,
-        repo,
-        failureInfo,
-        formDrciSevBody(sevs)
-      );
-
-      await updateCommentWithWorkflow(octokit, pr_info, comment, repo);
-    });
+    await updateCommentWithWorkflow(octokit, pr_info, comment, repo);
+  });
 }
 
-async function forAllPRs(workflowsByPR: Map<number, PRandJobs>, func: CallableFunction) {
+async function forAllPRs(
+  workflowsByPR: Map<number, PRandJobs>,
+  func: CallableFunction
+) {
   await Promise.all(
     Array.from(workflowsByPR.values()).map(async (pr_info) => {
       await func(pr_info);
@@ -107,7 +115,7 @@ async function forAllPRs(workflowsByPR: Map<number, PRandJobs>, func: CallableFu
 }
 
 function get_head_branch(repo: string) {
-    return repo === REPO ? "master" : "main";
+  return "main";
 }
 
 async function addMergeBaseCommits(
@@ -138,7 +146,9 @@ async function getBaseCommitJobs(
   }
 
   // fetch failing jobs on those shas
-  const commitFailedJobsQueryResult = await fetchFailedJobsFromCommits(baseShas);
+  const commitFailedJobsQueryResult = await fetchFailedJobsFromCommits(
+    baseShas
+  );
 
   // reorganize into a map of sha -> name -> data
   const jobsBySha = new Map();
@@ -161,17 +171,20 @@ function constructResultsJobsSections(
   description: string,
   jobs: RecentWorkflowsData[],
   suggestion?: string,
+  collapsed: boolean = false
 ): string {
   if (jobs.length === 0) {
     return "";
   }
-  let output = `\n<details open><summary><b>${header}</b> - ${description}:</summary>`;
+  let output = `\n<details ${
+    collapsed ? "" : "open"
+  }><summary><b>${header}</b> - ${description}:</summary>`;
 
   if (suggestion) {
-    output += `<p>👉 <b>${suggestion}</b></p>`
+    output += `<p>👉 <b>${suggestion}</b></p>`;
   }
 
-  output += "<p>\n\n" // Two newlines are needed for bullts below to be formattec correctly
+  output += "<p>\n\n"; // Two newlines are needed for bullts below to be formattec correctly
   const jobsSorted = jobs.sort((a, b) => a.name.localeCompare(b.name));
   for (const job of jobsSorted) {
     output += `* [${job.name}](${hud_pr_url}#${job.id}) ([gh](${job.html_url}))\n`;
@@ -180,69 +193,136 @@ function constructResultsJobsSections(
   return output;
 }
 
+function pluralize(word: string, count: number, pluralForm?: string): string {
+  if (count === 1) {
+    return word;
+  }
+
+  if (pluralForm) {
+    return pluralForm;
+  }
+
+  return `${word}s`;
+}
+
 export function constructResultsComment(
-    pending: number,
-    failedJobs: RecentWorkflowsData[],
-    flakyJobs: RecentWorkflowsData[],
-    brokenTrunkJobs: RecentWorkflowsData[],
-    sha: string,
-    merge_base: string,
-    hud_pr_url: string,
+  pending: number,
+  failedJobs: RecentWorkflowsData[],
+  flakyJobs: RecentWorkflowsData[],
+  brokenTrunkJobs: RecentWorkflowsData[],
+  unstableJobs: RecentWorkflowsData[],
+  sha: string,
+  merge_base: string,
+  hud_pr_url: string
 ): string {
-    let output = `\n`;
-    const failing = failedJobs.length + flakyJobs.length + brokenTrunkJobs.length;
-    const headerPrefix = `## `
-    const pendingIcon = `:hourglass_flowing_sand:`
-    const successIcon = `:white_check_mark:`
-    const noneFailing = ` No Failures`;
-    const someFailing = `## :x: ${failing} Failures`;
-    const somePending = `, ${pending} Pending`;
+  let output = `\n`;
+  const unrelatedFailureCount =
+    flakyJobs.length + brokenTrunkJobs.length + unstableJobs.length;
+  const failing =
+    failedJobs.length +
+    flakyJobs.length +
+    brokenTrunkJobs.length +
+    unstableJobs.length;
+  const headerPrefix = `## `;
+  const pendingIcon = `:hourglass_flowing_sand:`;
+  const successIcon = `:white_check_mark:`;
+  const failuresIcon = `:x:`;
+  const noneFailing = `No Failures`;
+  const significantFailures = `${failedJobs.length} New ${pluralize(
+    "Failure",
+    failedJobs.length
+  )}`;
+  const unrelatedFailures = `${unrelatedFailureCount} Unrelated ${pluralize(
+    "Failure",
+    unrelatedFailureCount
+  )}`;
+  const pendingJobs = `${pending} Pending`;
 
-    const hasFailing = failing > 0;
-    const hasPending = pending > 0;
-    if (!hasFailing) {
-        output += headerPrefix
-        if (hasPending) {
-            output += pendingIcon
-        } else {
-            output += successIcon
-        }
+  const hasAnyFailing = failing > 0;
+  const hasSignificantFailures = failedJobs.length > 0;
+  const hasPending = pending > 0;
+  const hasUnrelatedFailures =
+    flakyJobs.length + brokenTrunkJobs.length + unstableJobs.length;
 
-        output += noneFailing;
+  let icon = "";
+  if (hasSignificantFailures) {
+    icon = failuresIcon;
+  } else if (hasPending) {
+    icon = pendingIcon;
+  } else {
+    icon = successIcon;
+  }
 
-        if (hasPending) {
-            output += somePending;
-        }
+  let title_messages = [];
+  if (hasSignificantFailures) {
+    title_messages.push(significantFailures);
+  }
+  if (!hasAnyFailing) {
+    title_messages.push(noneFailing);
+  }
+  if (hasPending) {
+    title_messages.push(pendingJobs);
+  }
+  if (hasUnrelatedFailures) {
+    title_messages.push(unrelatedFailures);
+  }
 
-        output += `\nAs of commit ${sha}:`;
-        output += `\n:green_heart: Looks good so far! There are no failures yet. :green_heart:`;
-    } else {
-        output += someFailing;
-        if (hasPending) {
-            output += somePending;
-        }
-        output += `\nAs of commit ${sha}:`;
-        output += constructResultsJobsSections(
-          hud_pr_url,
-          "NEW FAILURES",
-          "The following jobs have failed",
-          failedJobs,
-        );
-    }
-    output += constructResultsJobsSections(
-      hud_pr_url,
-      "FLAKY",
-      "The following jobs failed but were likely due to flakiness present on master",
-      flakyJobs
-    );
-    output += constructResultsJobsSections(
-      hud_pr_url,
-      "BROKEN TRUNK",
-      `The following jobs failed but were present on the merge base ${merge_base}`,
-      brokenTrunkJobs,
-      "Rebase onto the `viable/strict` branch to avoid these failures"
-    );
-    return output;
+  let title = headerPrefix + icon + " " + title_messages.join(", ");
+  output += title;
+  output += `\nAs of commit ${sha}:`;
+
+  if (!hasAnyFailing) {
+    output += `\n:green_heart: Looks good so far! There are no failures yet. :green_heart:`;
+  }
+  output += constructResultsJobsSections(
+    hud_pr_url,
+    `NEW ${pluralize("FAILURE", failedJobs.length).toLocaleUpperCase()}`,
+    `The following ${failedJobs.length > 1 ? "jobs have" : "job has"} failed`,
+    failedJobs
+  );
+  output += constructResultsJobsSections(
+    hud_pr_url,
+    "FLAKY",
+    `The following ${pluralize("job", flakyJobs.length)} failed but ${pluralize(
+      "was",
+      flakyJobs.length,
+      "were"
+    )} likely due to flakiness present on trunk`,
+    flakyJobs,
+    "",
+    true
+  );
+  output += constructResultsJobsSections(
+    hud_pr_url,
+    "BROKEN TRUNK",
+    `The following ${pluralize(
+      "job",
+      brokenTrunkJobs.length
+    )} failed but ${pluralize(
+      "was",
+      flakyJobs.length,
+      "were"
+    )} present on the merge base ${merge_base}`,
+    brokenTrunkJobs,
+    "Rebase onto the `viable/strict` branch to avoid these failures",
+    true
+  );
+  output += constructResultsJobsSections(
+    hud_pr_url,
+    "UNSTABLE",
+    `The following ${pluralize(
+      "job",
+      unstableJobs.length
+    )} failed but ${pluralize(
+      "was",
+      unstableJobs.length,
+      "were"
+    )} likely due to flakiness present on trunk and has been marked as unstable`,
+    unstableJobs,
+    "",
+    true
+  );
+  return output;
 }
 
 function isFlaky(
@@ -267,16 +347,20 @@ export function getWorkflowJobsStatuses(
   failedJobs: RecentWorkflowsData[];
   flakyJobs: RecentWorkflowsData[];
   brokenTrunkJobs: RecentWorkflowsData[];
+  unstableJobs: RecentWorkflowsData[];
 } {
   let pending = 0;
   const failedJobs: RecentWorkflowsData[] = [];
   const flakyJobs: RecentWorkflowsData[] = [];
   const brokenTrunkJobs: RecentWorkflowsData[] = [];
+  const unstableJobs: RecentWorkflowsData[] = [];
   for (const [name, job] of prInfo.jobs) {
     if (job.conclusion === null && job.completed_at === null) {
       pending++;
     } else if (job.conclusion === "failure" || job.conclusion === "cancelled") {
-      if (
+      if (job.name !== undefined && job.name.includes("unstable")) {
+        unstableJobs.push(job);
+      } else if (
         baseJobs.get(job.name)?.conclusion == job.conclusion &&
         isEqual(job.failure_captures, baseJobs.get(job.name)?.failure_captures)
       ) {
@@ -288,7 +372,7 @@ export function getWorkflowJobsStatuses(
       }
     }
   }
-  return { pending, failedJobs, flakyJobs, brokenTrunkJobs };
+  return { pending, failedJobs, flakyJobs, brokenTrunkJobs, unstableJobs };
 }
 
 export function reorganizeWorkflows(
@@ -331,22 +415,22 @@ export function reorganizeWorkflows(
 }
 
 export async function updateCommentWithWorkflow(
-    octokit: Octokit,
-    pr_info: PRandJobs,
-    comment: string,
-    repo: string,
+  octokit: Octokit,
+  pr_info: PRandJobs,
+  comment: string,
+  repo: string
 ): Promise<void> {
-    const { pr_number } = pr_info;
-    const { id, body } = await getDrciComment(octokit, OWNER, repo, pr_number!);
+  const { pr_number } = pr_info;
+  const { id, body } = await getDrciComment(octokit, OWNER, repo, pr_number!);
 
-    if (id === 0 || body === comment) {
-        return;
-    }
+  if (id === 0 || body === comment) {
+    return;
+  }
 
-    await octokit.rest.issues.updateComment({
-        body: comment,
-        owner: OWNER,
-        repo: repo,
-        comment_id: id,
-    });
+  await octokit.rest.issues.updateComment({
+    body: comment,
+    owner: OWNER,
+    repo: repo,
+    comment_id: id,
+  });
 }

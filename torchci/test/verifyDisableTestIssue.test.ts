@@ -1,7 +1,15 @@
 import { Probot } from "probot";
 import * as utils from "./utils";
 import myProbotApp, * as bot from "../lib/bot/verifyDisableTestIssueBot";
-import * as botUtils from "../lib/bot/utils";
+import nock from "nock";
+import { requireDeepCopy, handleScope } from "./common";
+import {
+  pytorchBotId,
+  disabledKey,
+  unstableKey,
+} from "../lib/bot/verifyDisableTestIssueBot";
+
+nock.disableNetConnect();
 
 describe("verify-disable-test-issue", () => {
   let probot: Probot;
@@ -11,16 +19,57 @@ describe("verify-disable-test-issue", () => {
     probot.load(myProbotApp);
   });
 
+  test("issue opened with title starts w/ DISABLED: unauthorized", async () => {
+    let title = "DISABLED pull / linux-bionic-py3.8-clang9";
+    const jobName = bot.parseTitle(title, disabledKey);
+    let comment = bot.formJobValidationComment(
+      "mock-user",
+      false,
+      jobName,
+      disabledKey
+    );
+
+    expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
+    expect(
+      comment.includes("You (mock-user) don't have permission to disable")
+    ).toBeTruthy();
+    expect(comment.includes("ERROR")).toBeTruthy();
+
+    title = "DISABLED testMethodName (testClass.TestSuite)";
+    const body = "Platforms:linux,macos";
+
+    const platforms = bot.parseBody(body);
+    const testName = bot.parseTitle(title, disabledKey);
+
+    comment = bot.formValidationComment(
+      "mock-user",
+      false,
+      testName,
+      platforms
+    );
+
+    expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
+    expect(
+      comment.includes("You (mock-user) don't have permission to disable")
+    ).toBeTruthy();
+    expect(comment.includes("ERROR")).toBeTruthy();
+  });
+
   test("issue opened with title starts w/ DISABLED: disable for win", async () => {
     const title = "DISABLED testMethodName (testClass.TestSuite)";
     const body = "whatever\nPlatforms:win\nyay";
 
     const platforms = bot.parseBody(body);
-    const testName = bot.parseTitle(title);
+    const testName = bot.parseTitle(title, disabledKey);
     expect(platforms).toMatchObject([new Set(["win"]), new Set()]);
     expect(testName).toEqual("testMethodName (testClass.TestSuite)");
 
-    const comment = bot.formValidationComment(testName, platforms);
+    const comment = bot.formValidationComment(
+      "mock-user",
+      true,
+      testName,
+      platforms
+    );
     expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
     expect(
       comment.includes(
@@ -37,14 +86,19 @@ describe("verify-disable-test-issue", () => {
     const body = "whatever\nPlatforms:windows, ROCm, ASAN\nyay";
 
     const platforms = bot.parseBody(body);
-    const testName = bot.parseTitle(title);
+    const testName = bot.parseTitle(title, disabledKey);
     expect(platforms).toMatchObject([
       new Set(["windows", "rocm", "asan"]),
       new Set(),
     ]);
     expect(testName).toEqual("testMethodName (testClass.TestSuite)");
 
-    const comment = bot.formValidationComment(testName, platforms);
+    const comment = bot.formValidationComment(
+      "mock-user",
+      true,
+      testName,
+      platforms
+    );
     expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
     expect(
       comment.includes(
@@ -63,11 +117,16 @@ describe("verify-disable-test-issue", () => {
     const body = "whatever yay";
 
     const platforms = bot.parseBody(body);
-    const testName = bot.parseTitle(title);
+    const testName = bot.parseTitle(title, disabledKey);
     expect(platforms).toMatchObject([new Set(), new Set()]);
     expect(testName).toEqual("testMethodName (testClass.TestSuite)");
 
-    const comment = bot.formValidationComment(testName, platforms);
+    const comment = bot.formValidationComment(
+      "mock-user",
+      true,
+      testName,
+      platforms
+    );
     expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
     expect(
       comment.includes(
@@ -84,11 +143,16 @@ describe("verify-disable-test-issue", () => {
     const body = "whatever\nPlatforms:everything\nyay";
 
     const platforms = bot.parseBody(body);
-    const testName = bot.parseTitle(title);
+    const testName = bot.parseTitle(title, disabledKey);
     expect(platforms).toMatchObject([new Set(), new Set(["everything"])]);
     expect(testName).toEqual("testMethodName (testClass.TestSuite)");
 
-    const comment = bot.formValidationComment(testName, platforms);
+    const comment = bot.formValidationComment(
+      "mock-user",
+      true,
+      testName,
+      platforms
+    );
     expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
     expect(
       comment.includes(
@@ -111,13 +175,18 @@ describe("verify-disable-test-issue", () => {
     const body = "whatever\nPlatforms:\nyay";
 
     const platforms = bot.parseBody(body);
-    const testName = bot.parseTitle(title);
+    const testName = bot.parseTitle(title, disabledKey);
     expect(platforms).toMatchObject([new Set(), new Set()]);
     expect(testName).toEqual(
       "testMethodName   (quantization.core.test_workflow_ops.TestFakeQuantizeOps)"
     );
 
-    const comment = bot.formValidationComment(testName, platforms);
+    const comment = bot.formValidationComment(
+      "mock-user",
+      true,
+      testName,
+      platforms
+    );
     expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
     expect(comment.includes("~15 minutes")).toBeTruthy();
     expect(comment.includes("ERROR")).toBeFalsy();
@@ -129,11 +198,16 @@ describe("verify-disable-test-issue", () => {
     const body = "whatever\nPlatforms:\nyay";
 
     const platforms = bot.parseBody(body);
-    const testName = bot.parseTitle(title);
+    const testName = bot.parseTitle(title, disabledKey);
     expect(platforms).toMatchObject([new Set(), new Set()]);
     expect(testName).toEqual("testMethodName   cuz it borked");
 
-    const comment = bot.formValidationComment(testName, platforms);
+    const comment = bot.formValidationComment(
+      "mock-user",
+      true,
+      testName,
+      platforms
+    );
     expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
     expect(comment.includes("~15 minutes")).toBeFalsy();
     expect(comment.includes("ERROR")).toBeTruthy();
@@ -145,11 +219,16 @@ describe("verify-disable-test-issue", () => {
     const body = "whatever\nPlatforms:all of them\nyay";
 
     const platforms = bot.parseBody(body);
-    const testName = bot.parseTitle(title);
+    const testName = bot.parseTitle(title, disabledKey);
     expect(platforms).toMatchObject([new Set(), new Set(["all of them"])]);
     expect(testName).toEqual("testMethodName   cuz it borked");
 
-    const comment = bot.formValidationComment(testName, platforms);
+    const comment = bot.formValidationComment(
+      "mock-user",
+      true,
+      testName,
+      platforms
+    );
     expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
     expect(comment.includes("~15 minutes")).toBeFalsy();
     expect(comment.includes("ERROR")).toBeTruthy();
@@ -194,35 +273,102 @@ describe("verify-disable-test-issue", () => {
   test("issue opened with title starts w/ DISABLED: to disable a job", async () => {
     const title = "DISABLED pull / linux-bionic-py3.8-clang9";
 
-    const jobName = bot.parseTitle(title);
+    const jobName = bot.parseTitle(title, disabledKey);
     expect(jobName).toEqual("pull / linux-bionic-py3.8-clang9");
 
-    const spy = jest.spyOn(botUtils, "hasWritePermissions");
-
-    spy.mockReturnValue(Promise.resolve(true));
-    let comment = await bot.formJobValidationComment(
-      "context",
+    let comment = bot.formJobValidationComment(
       "mock-user",
-      jobName
+      true,
+      jobName,
+      disabledKey
     );
     expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
     expect(comment.includes(`~15 minutes, \`${jobName}\``)).toBeTruthy();
     expect(comment.includes("ERROR")).toBeFalsy();
+  });
 
-    spy.mockReturnValue(Promise.resolve(false));
-    comment = await bot.formJobValidationComment(
-      "context",
+  test("issue opened with title starts w/ UNSTABLE: to mark a job as unstable", async () => {
+    const title = "UNSTABLE windows-binary-libtorch-release";
+
+    const jobName = bot.parseTitle(title, unstableKey);
+    expect(jobName).toEqual("windows-binary-libtorch-release");
+
+    let comment = bot.formJobValidationComment(
       "mock-user",
-      jobName
+      true,
+      jobName,
+      unstableKey
     );
     expect(comment.includes("<!-- validation-comment-start -->")).toBeTruthy();
-    expect(
-      comment.includes(
-        "You (mock-user) don't have permission to disable"
-      )
-    ).toBeTruthy();
-    expect(comment.includes("ERROR")).toBeTruthy();
+    expect(comment.includes(`~15 minutes, \`${jobName}\``)).toBeTruthy();
+    expect(comment.includes("ERROR")).toBeFalsy();
+  });
+});
 
-    spy.mockRestore();
+describe("verify-disable-test-issue-bot", () => {
+  let probot: Probot;
+
+  beforeEach(() => {
+    probot = utils.testProbot();
+    probot.load(myProbotApp);
+  });
+
+  afterEach(() => {
+    nock.cleanAll();
+    jest.restoreAllMocks();
+  });
+
+  test("pytorch-bot[bot] is authorized", async () => {
+    const payload = requireDeepCopy("./fixtures/issues.opened.json");
+    payload.issue.title = "DISABLED testMethodName (testClass.TestSuite)";
+    payload.issue.user.id = pytorchBotId;
+
+    const owner = payload.repository.owner.login;
+    const repo = payload.repository.name;
+    const number = payload.issue.number;
+
+    const scope = nock("https://api.github.com")
+      .get(`/repos/${owner}/${repo}/issues/${number}/comments?per_page=10`)
+      .reply(200, [])
+      .post(
+        `/repos/${owner}/${repo}/issues/${number}/comments`,
+        (body) => !body.body.includes("don't have permission")
+      )
+      .reply(200);
+
+    await probot.receive({ name: "issues", payload: payload, id: "2" });
+
+    handleScope(scope);
+  });
+
+  test("random user is not authorized", async () => {
+    const payload = requireDeepCopy("./fixtures/issues.opened.json");
+    payload.issue.title = "DISABLED testMethodName (testClass.TestSuite)";
+    payload.issue.user.login = "randomuser";
+
+    const owner = payload.repository.owner.login;
+    const repo = payload.repository.name;
+    const number = payload.issue.number;
+
+    const scope = nock("https://api.github.com")
+      .get(`/repos/${owner}/${repo}/issues/${number}/comments?per_page=10`)
+      .reply(200, [])
+      .get(`/repos/${owner}/${repo}/collaborators/randomuser/permission`)
+      .reply(200, {
+        permission: "read",
+      })
+      .post(`/repos/${owner}/${repo}/issues/${number}/comments`, (body) =>
+        body.body.includes("don't have permission")
+      )
+      .reply(200)
+      .patch(
+        `/repos/${owner}/${repo}/issues/${number}`,
+        (body) => body.state === "closed"
+      )
+      .reply(200);
+
+    await probot.receive({ name: "issues", payload: payload, id: "2" });
+
+    handleScope(scope);
   });
 });

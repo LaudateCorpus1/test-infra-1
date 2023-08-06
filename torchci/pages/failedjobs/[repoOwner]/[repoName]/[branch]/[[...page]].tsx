@@ -221,7 +221,11 @@ function FailedJobs({
           </summary>
           <ul>
             {_.map(groupedJobsByFailure, (jobs, failure) => (
-              <FailedJobsByFailure jobs={jobs} annotations={annotations} />
+              <FailedJobsByFailure
+                key={failure}
+                jobs={jobs}
+                annotations={annotations}
+              />
             ))}
           </ul>
         </details>
@@ -235,6 +239,7 @@ export default function Page() {
   const { repoName, repoOwner, branch } = router.query;
   const [startTime, setStartTime] = useState(dayjs().subtract(1, "week"));
   const [stopTime, setStopTime] = useState(dayjs());
+  const [timeRange, setTimeRange] = useState<number>(7);
 
   const queryParams: RocksetParam[] = [
     {
@@ -272,9 +277,11 @@ export default function Page() {
         </Typography>
         <TimeRangePicker
           startTime={startTime}
-          stopTime={stopTime}
           setStartTime={setStartTime}
+          stopTime={stopTime}
           setStopTime={setStopTime}
+          timeRange={timeRange}
+          setTimeRange={setTimeRange}
         />
       </Stack>
 

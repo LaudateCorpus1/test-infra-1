@@ -86,7 +86,7 @@ pattern = 'XPASS(?: \[.*\])?: (test.*) \((?:__main__\.)?(.*)\)'
 
 [[rule]]
 name = 'pytest failure'
-pattern = '^FAILED (\S*.py::\S*::test_\S*)'
+pattern = '^FAILED (?:\[.*s\] )?(\S*.py::\S*::test_\S*)'
 
 [[rule]]
 name = 'Python unittest error'
@@ -94,7 +94,7 @@ pattern = 'ERROR(?: \[.*\])?: (test.*) \((?:__main__\.)?(.*)\)'
 
 [[rule]]
 name = 'pytest test error'
-pattern = '^ERROR (\S*.py::\S*::test_\S*)'
+pattern = '^ERROR (?:\[.*s\] )?(\S*.py::\S*::test_\S*)'
 
 [[rule]]
 name = 'inductor model failure'
@@ -173,6 +173,10 @@ name = 'Bad response status code'
 pattern = '^##\[error\]Response status code does not indicate success: .*$'
 
 [[rule]]
+name = 'Python Test timeout (KeyboardInterrupt)'
+pattern = '!+ KeyboardInterrupt !+'
+
+[[rule]]
 name = 'Python Test File RuntimeError'
 pattern = '^RuntimeError: .*test.* failed'
 
@@ -183,6 +187,10 @@ pattern = '^RuntimeError: CUDA out of memory.'
 [[rule]]
 name = 'Python AttributeError'
 pattern = '^AttributeError: .*'
+
+[[rule]]
+name = 'File level retry'
+pattern = '^Got exit code -.*, retrying \(retries left=.*\)$'
 
 [[rule]]
 name = 'Python flaky unittest - failed'

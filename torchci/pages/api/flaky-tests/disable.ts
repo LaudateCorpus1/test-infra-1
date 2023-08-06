@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getOctokit } from "lib/github";
 import fetchFlakyTests, {
   fetchFlakyTestsAcrossJobs,
+  fetchFlakyTestsAcrossFileReruns,
 } from "lib/fetchFlakyTests";
 import fetchDisabledNonFlakyTests from "lib/fetchDisabledNonFlakyTests";
 import { FlakyTestData, IssueData, DisabledNonFlakyTestData } from "lib/types";
@@ -30,33 +31,44 @@ export default async function handler(
 }
 
 async function disableFlakyTestsAndReenableNonFlakyTests() {
-  const [octokit, flakyTests, flakyTestsAcrossJobs, issues, disabledNonFlakyTests] = await Promise.all(
-    [
-      getOctokit(owner, repo),
-      fetchFlakyTests(`${NUM_HOURS}`),
-      fetchFlakyTestsAcrossJobs(`${NUM_HOURS_ACROSS_JOBS}`), // use a larger time window so we can get more data
-      fetchIssuesByLabel("skipped"),
-      fetchDisabledNonFlakyTests(),
-    ]
-  );
+  const [
+    octokit,
+    flakyTests,
+    flakyTestsAcrossFileReruns,
+    flakyTestsAcrossJobs,
+    issues,
+    disabledNonFlakyTests,
+  ] = await Promise.all([
+    getOctokit(owner, repo),
+    fetchFlakyTests(`${NUM_HOURS}`),
+    fetchFlakyTestsAcrossFileReruns(`${NUM_HOURS}`),
+    fetchFlakyTestsAcrossJobs(`${NUM_HOURS_ACROSS_JOBS}`), // use a larger time window so we can get more data
+    fetchIssuesByLabel("skipped"),
+    fetchDisabledNonFlakyTests(),
+  ]);
 
-  const allFlakyTests = flakyTests.concat(flakyTestsAcrossJobs);
+  const allFlakyTests = flakyTests.concat(flakyTestsAcrossJobs).concat(flakyTestsAcrossFileReruns);
   // If the test is flaky only on PRs, we should not disable it yet.
   const flakyTestsOnTrunk = filterThreshold(
     filterOutPRFlakyTests(allFlakyTests)
   );
 
+  const dedupedIssues = await dedupFlakyTestIssues(octokit, issues);
+
   flakyTestsOnTrunk.forEach(async function (test) {
-    await handleFlakyTest(test, issues, octokit);
+    await handleFlakyTest(test, dedupedIssues, octokit);
   });
 
   // Get the list of non-flaky tests, the list of all flaky tests is used to guarantee
   // that no flaky test is accidentally closed
-  const nonFlakyTests = filterOutNonFlakyTests(disabledNonFlakyTests, allFlakyTests);
+  const nonFlakyTests = filterOutNonFlakyTests(
+    disabledNonFlakyTests,
+    allFlakyTests
+  );
 
   nonFlakyTests.forEach(async function (test) {
     await handleNonFlakyTest(test, issues, octokit);
-  })
+  });
 }
 
 export function filterOutPRFlakyTests(tests: FlakyTestData[]): FlakyTestData[] {
@@ -81,6 +93,7 @@ export async function handleFlakyTest(
   const issueTitle = getIssueTitle(test.name, test.suite);
   const matchingIssues = issues.filter((issue) => issue.title === issueTitle);
   const workflowJobNames = getWorkflowJobNames(test);
+  test.invoking_file = test.invoking_file.replaceAll(".", "/");
   if (matchingIssues.length !== 0) {
     // There is a matching issue
     const matchingIssue = matchingIssues[0];
@@ -129,7 +142,7 @@ export async function handleFlakyTest(
 
 export function filterOutNonFlakyTests(
   nonFlakyTests: DisabledNonFlakyTestData[],
-  allFlakyTests: FlakyTestData[],
+  allFlakyTests: FlakyTestData[]
 ): DisabledNonFlakyTestData[] {
   const flakyTestKeys = allFlakyTests.map(
     (test) => `${test.name} / ${test.suite}`
@@ -138,6 +151,44 @@ export function filterOutNonFlakyTests(
   return nonFlakyTests.filter(
     (test) => !flakyTestKeys.includes(`${test.name} / ${test.classname}`)
   );
+}
+
+export async function dedupFlakyTestIssues(
+  octokit: Octokit,
+  issues: IssueData[]
+): Promise<IssueData[]> {
+  // Dedup the list of issues by favoring open issues and issues with the
+  // largest PR number.
+
+  let deduped = new Map<string, IssueData>();
+
+  for (const issue of issues) {
+    const key = issue.title;
+    const existing_issue = deduped.get(key);
+    if (
+      !existing_issue ||
+      (issue.state === existing_issue.state &&
+        issue.number > existing_issue.number) ||
+      (existing_issue.state === "closed" && issue.state === "open")
+    ) {
+      deduped.set(key, issue);
+    }
+  }
+  const dedupedArray = Array.from(deduped.values());
+
+  // Close the issues that aren't favored
+  const dedupedArrayNumbers = dedupedArray.map((i) => i.number);
+  for (const issue of issues) {
+    if (!dedupedArrayNumbers.includes(issue.number) && issue.state === "open") {
+      await octokit.rest.issues.update({
+        owner,
+        repo,
+        issue_number: issue.number,
+        state: "closed",
+      });
+    }
+  }
+  return dedupedArray;
 }
 
 export async function handleNonFlakyTest(
@@ -156,7 +207,8 @@ export async function handleNonFlakyTest(
 
   if (matchingIssue.state === "open") {
     const updatedAt = dayjs(matchingIssue.updated_at);
-    const daysSinceLastUpdate: number = NUM_HOURS_NOT_UPDATED_BEFORE_CLOSING / 24;
+    const daysSinceLastUpdate: number =
+      NUM_HOURS_NOT_UPDATED_BEFORE_CLOSING / 24;
 
     // Only close the issue if the issue is not flaky and hasn't been updated in
     // NUM_HOURS_NOT_UPDATED_BEFORE_CLOSING hours, defaults to 2 weeks
@@ -170,7 +222,8 @@ export async function handleNonFlakyTest(
     }
     console.log(`${matchingIssue.number} is not longer flaky`);
 
-    const body = `Resolving the issue because the test is not flaky anymore after ${test.num_green} reruns without ` +
+    const body =
+      `Resolving the issue because the test is not flaky anymore after ${test.num_green} reruns without ` +
       `any failures and the issue hasn't been updated in ${daysSinceLastUpdate} days. Please reopen the ` +
       `issue to re-disable the test if you think this is a false positive`;
     await octokit.rest.issues.createComment({
@@ -193,7 +246,7 @@ export async function handleNonFlakyTest(
 export function getLatestTrunkJobURL(test: FlakyTestData): string {
   let index = test.branches.lastIndexOf("master");
   if (index < 0) {
-    let index = test.branches.lastIndexOf("main");
+    index = test.branches.lastIndexOf("main");
     if (index < 0) {
       console.warn(
         `Flaky test ${test.name} has no trunk failures. Disabling anyway, but this may be unintended.`
@@ -226,13 +279,26 @@ export function getPlatformsAffected(workflowJobNames: string[]): string[] {
       if (
         workflowJobNames.includes(platform) &&
         (platform == "rocm" || !workflowJobNames.includes("rocm")) &&
-        (platform == "dynamo" || !workflowJobNames.includes("dynamo")) &&
+        !workflowJobNames.includes("dynamo") &&
+        !workflowJobNames.includes("inductor") &&
         !platformsToSkip.includes(platform)
       ) {
         platformsToSkip.push(platform);
       }
     })
   );
+
+  // dynamo and inductor are subsets of linux, so only include them if linux is
+  // not present as a disable platform
+  if (!platformsToSkip.includes("linux")) {
+    if (workflowJobNames.some((name) => name.includes("dynamo"))) {
+      platformsToSkip.push("dynamo");
+    }
+    if (workflowJobNames.some((name) => name.includes("inductor"))) {
+      platformsToSkip.push("inductor");
+    }
+  }
+
   return platformsToSkip;
 }
 
@@ -249,7 +315,7 @@ To find relevant log snippets:
 `;
   let fileInfo = `Test file path: \`${test.file}\``;
   if (test.file !== `${test.invoking_file}.py`) {
-    fileInfo += ` or \`${test.file}\``;
+    fileInfo += ` or \`${test.invoking_file}\``;
   }
   if (test.numRed === undefined) {
     // numRed === undefined indicates that is from the 'flaky_tests_across_jobs' query
@@ -277,21 +343,21 @@ ${fileInfo}`;
 }
 
 export async function getTestOwnerLabels(
-  testFile: string,
-  invokingFile: string
+  test: FlakyTestData
 ): Promise<{ labels: string[]; additionalErrMessage?: string }> {
-  const urlkey =
-    "https://raw.githubusercontent.com/pytorch/pytorch/master/test/";
+  const urlkey = "https://raw.githubusercontent.com/pytorch/pytorch/main/test/";
+
+  let labels: string[] = [];
+  let additionalErrMessage = undefined;
 
   try {
-    let result = await retryRequest(`${urlkey}${testFile}`);
+    let result = await retryRequest(`${urlkey}${test.file}`);
     let statusCode = result.res.statusCode;
     if (statusCode !== 200) {
-      const invokingFileClean = invokingFile.replaceAll(".", "/");
-      result = await retryRequest(`${urlkey}${invokingFileClean}.py`);
+      result = await retryRequest(`${urlkey}${test.invoking_file}.py`);
       if (result.res.statusCode !== 200) {
         throw new Error(
-          `Error retrieving ${testFile}: ${statusCode}, ${invokingFileClean}: ${result.res.statusCode}`
+          `Error retrieving ${test.file}: ${statusCode}, ${test.invoking_file}: ${result.res.statusCode}`
         );
       }
     }
@@ -300,30 +366,29 @@ export async function getTestOwnerLabels(
     const prefix = "# Owner(s): ";
     for (const line of lines) {
       if (line.startsWith(prefix)) {
-        const labels: string[] = JSON.parse(line.substring(prefix.length));
-        if (labels.length === 0) {
-          return { labels: ["module: unknown"] };
-        }
-        if (
-          labels.some(
-            (x) => x.startsWith("module: ") && x !== "module: unknown"
-          )
-        ) {
-          labels.push("triaged");
-        }
-        return { labels: labels };
+        labels = labels.concat(JSON.parse(line.substring(prefix.length)));
+        break;
       }
     }
-    return { labels: ["module: unknown"] };
   } catch (err) {
     console.warn(err);
-    return {
-      labels: ["module: unknown"],
-      additionalErrMessage: `${err}`,
-    };
+    additionalErrMessage = `${err}`;
   }
-}
 
+  if (labels.length === 0) {
+    labels.push("module: unknown");
+  }
+
+  let platforms = getPlatformsAffected(getWorkflowJobNames(test));
+  if (platforms.includes("dynamo") || platforms.includes("inductor")) {
+    labels.push("oncall: pt2");
+  }
+
+  if (labels.some((x) => x.startsWith("module: ") && x !== "module: unknown")) {
+    labels.push("triaged");
+  }
+  return { labels, additionalErrMessage };
+}
 
 export function wasRecent(test: FlakyTestData) {
   if (test.eventTimes) {
@@ -334,17 +399,13 @@ export function wasRecent(test: FlakyTestData) {
   return true;
 }
 
-
 export async function createIssueFromFlakyTest(
   test: FlakyTestData,
   octokit: Octokit
 ): Promise<void> {
   const title = getIssueTitle(test.name, test.suite);
   let body = getIssueBodyForFlakyTest(test);
-  const { labels, additionalErrMessage } = await getTestOwnerLabels(
-    test.file,
-    test.invoking_file
-  );
+  const { labels, additionalErrMessage } = await getTestOwnerLabels(test);
   if (additionalErrMessage) {
     body += `\n\n${additionalErrMessage}`;
   }

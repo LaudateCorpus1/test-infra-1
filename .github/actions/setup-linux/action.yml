@@ -54,10 +54,14 @@ runs:
         RUNNER_ARTIFACT_DIR="${RUNNER_TEMP}/artifacts"
         mkdir -p "${RUNNER_ARTIFACT_DIR}"
         echo "RUNNER_ARTIFACT_DIR=${RUNNER_ARTIFACT_DIR}" >> "${GITHUB_ENV}"
-        
+
         RUNNER_TEST_RESULTS_DIR="${RUNNER_TEMP}/test-results"
         mkdir -p "${RUNNER_TEST_RESULTS_DIR}"
         echo "RUNNER_TEST_RESULTS_DIR=${RUNNER_TEST_RESULTS_DIR}" >> "${GITHUB_ENV}"
+
+        RUNNER_DOCS_DIR="${RUNNER_TEMP}/docs"
+        mkdir -p "${RUNNER_DOCS_DIR}"
+        echo "RUNNER_DOCS_DIR=${RUNNER_DOCS_DIR}" >> "${GITHUB_ENV}"
 
     - name: Needs nvidia driver?
       shell: bash
@@ -70,5 +74,14 @@ runs:
         echo "does=${needs}" >> $GITHUB_OUTPUT
 
     - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-      uses: ./test-infra/.github/actions/setup-nvidia
+      uses: pytorch/test-infra/.github/actions/setup-nvidia@main
       if: ${{ steps.needs-nvidia-driver.outputs.does == 1 }}
+
+    - name: Kill any existing containers, clean up images
+      shell: bash
+      run: |
+        # ignore expansion of "docker ps -q" since it could be empty
+        # shellcheck disable=SC2046
+        docker stop $(docker ps -q) || true
+        # Prune all of the docker images
+        docker system prune -af

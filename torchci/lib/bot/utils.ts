@@ -1,5 +1,6 @@
 import { Context, Probot } from "probot";
 import urllib from "urllib";
+import { Octokit } from "octokit";
 
 export function repoKey(
   context: Context | Context<"pull_request.labeled">
@@ -17,7 +18,17 @@ export function isPyTorchPyTorch(owner: string, repo: string): boolean {
 }
 
 export function isDrCIEnabled(owner: string, repo: string): boolean {
-  return isPyTorchOrg(owner) && ["pytorch", "vision"].includes(repo);
+  return (
+    isPyTorchOrg(owner) &&
+    [
+      "pytorch",
+      "vision",
+      "text",
+      "audio",
+      "pytorch-canary",
+      "tutorials",
+    ].includes(repo)
+  );
 }
 
 export class CachedConfigTracker {
@@ -172,6 +183,21 @@ export async function hasWritePermissions(
   username: string
 ): Promise<boolean> {
   const permissions = await getUserPermissions(ctx, username);
+  return permissions === "admin" || permissions === "write";
+}
+
+export async function hasWritePermissionsUsingOctokit(
+  octokit: Octokit,
+  username: string,
+  owner: string,
+  repo: string
+): Promise<boolean> {
+  const res = await octokit.rest.repos.getCollaboratorPermissionLevel({
+    owner: owner,
+    repo: repo,
+    username: username,
+  });
+  const permissions = res?.data?.permission;
   return permissions === "admin" || permissions === "write";
 }
 

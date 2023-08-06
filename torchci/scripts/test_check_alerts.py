@@ -4,14 +4,13 @@ from unittest import main, TestCase
 from unittest.mock import patch
 
 from check_alerts import (
-    fetch_alerts,
+    fetch_alerts_filter,
     filter_job_names,
     gen_update_comment,
     generate_no_flaky_tests_issue,
     handle_flaky_tests_alert,
     JobStatus,
     PYTORCH_ALERT_LABEL,
-    TEST_INFRA_REPO_NAME,
 )
 
 
@@ -84,7 +83,7 @@ def mock_fetch_alerts(*args, **kwargs):
                 "issues": {
                     "nodes": [
                         {
-                            "title": "[Pytorch] There are 3 Recurrently Failing Jobs on pytorch/pytorch master",
+                            "title": "[Pytorch] There are 3 Recurrently Failing Jobs on pytorch/pytorch main",
                             "closed": False,
                             "number": 3763,
                             "body": "",
@@ -156,25 +155,28 @@ class TestGitHubPR(TestCase):
 
     def test_update_comment_empty(self):
         jobs = [JobStatus("job1", [{}]), JobStatus("job2", [{}])]
-        body = (
+        original_issue = {"closed": False}
+        original_issue["body"] = (
             "- [job1](a) failed consecutively starting with commit []()\n"
             "- [job2](a) failed consecutively starting with commit []()"
         )
-        update_comment = gen_update_comment(body, jobs)
+        update_comment = gen_update_comment(original_issue, jobs)
         self.assertFalse(update_comment)
 
         jobs = [JobStatus("job1", [{}]), JobStatus("job2", [{}])]
-        body = "- [job1](a) failed consecutively starting with commit []()"
-        update_comment = gen_update_comment(body, jobs)
+        original_issue[
+            "body"
+        ] = "- [job1](a) failed consecutively starting with commit []()"
+        update_comment = gen_update_comment(original_issue, jobs)
         self.assertTrue("started failing" in update_comment)
         self.assertTrue("job2" in update_comment)
 
         jobs = [JobStatus("job1", [{}])]
-        body = (
+        original_issue["body"] = (
             "- [job1](a) failed consecutively starting with commit []()\n"
             "- [job2](a) failed consecutively starting with commit []()"
         )
-        update_comment = gen_update_comment(body, jobs)
+        update_comment = gen_update_comment(original_issue, jobs)
         self.assertTrue("stopped failing" in update_comment)
         self.assertTrue("job2" in update_comment)
 
@@ -269,10 +271,10 @@ class TestGitHubPR(TestCase):
             },
             {
                 "repo": "pytorch/pytorch",
-                "branch": "master",
+                "branch": "main",
                 "expected": [
                     {
-                        "title": "[Pytorch] There are 3 Recurrently Failing Jobs on pytorch/pytorch master",
+                        "title": "[Pytorch] There are 3 Recurrently Failing Jobs on pytorch/pytorch main",
                         "closed": False,
                         "number": 3763,
                         "body": "",
@@ -296,10 +298,9 @@ class TestGitHubPR(TestCase):
         ]
 
         for case in cases:
-            alerts = fetch_alerts(
+            alerts = fetch_alerts_filter(
                 repo=case["repo"],
                 branch=case["branch"],
-                alert_repo=TEST_INFRA_REPO_NAME,
                 labels=PYTORCH_ALERT_LABEL,
             )
             self.assertListEqual(alerts, case["expected"])

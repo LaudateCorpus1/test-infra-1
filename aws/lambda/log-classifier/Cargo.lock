@@ -230,9 +230,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sigv4"
-version = "0.48.0"
+version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b99b21b3aceaf224cccd693b353e1f38af4ede8c5fc618b97dd458bb63238efc"
+checksum = "9de17d7931657b99d0fcee1e5988cd2c230f244d58117fd9d4d49254832556af"
 dependencies = [
  "aws-smithy-eventstream",
  "aws-smithy-http",
@@ -783,9 +783,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.3.14"
+version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca32592cf21ac7ccab1825cd87f6c9b3d9022c44d086172ed0966bec8af30be"
+checksum = "66b91535aa35fea1523ad1b86cb6b53c28e0ae566ba4a460f4457e936cad7c6f"
 dependencies = [
  "bytes",
  "fnv",
@@ -1242,7 +1242,6 @@ name = "openssl-sys"
 version = "0.9.84"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a20eace9dc2d82904039cb76dcf50fb1a0bba071cfd1629720b5d6f1ddba0fa"
-dependencies = [
  "cc",
  "libc",
  "openssl-src",

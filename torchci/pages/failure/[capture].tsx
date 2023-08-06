@@ -38,6 +38,7 @@ function FailureInfo({
   // we highlight master branch
   const highlighted = new Set<string>();
   highlighted.add("master");
+  highlighted.add("main");
 
   const branchNames = new Set<string>(highlighted);
   samples.forEach((job, i) => {
@@ -172,11 +173,11 @@ function FailureInfo({
         <table>
           <tbody>
             {Object.entries(jobCount)
-              .sort(function([jobAName, jobACount], [jobBName, jobBCount]) {
+              .sort(function ([jobAName, jobACount], [jobBName, jobBCount]) {
                 if (jobACount != jobBCount) {
-                  return jobBCount-jobACount
+                  return jobBCount - jobACount;
                 }
-                return jobAName.localeCompare(jobBName)
+                return jobAName.localeCompare(jobBName);
               })
               .map(([job, count]) => (
                 <tr key={job}>
@@ -191,21 +192,26 @@ function FailureInfo({
       <ul>
         {samples
           // Keep the most recent samples on top
-          .sort(function(sampleA: JobData, sampleB: JobData) {
+          .sort(function (sampleA: JobData, sampleB: JobData) {
             if (sampleA.time == sampleB.time) {
-              return 0 
+              return 0;
             }
-            return dayjs(sampleA.time).isBefore(dayjs(sampleB.time)) ? 1 : -1
+            return dayjs(sampleA.time).isBefore(dayjs(sampleB.time)) ? 1 : -1;
           })
           .map((sample) => (
-          <li key={sample.id}>
-            <JobSummary job={sample} highlight={sample.branch ? highlighted.has(sample.branch) : false} />
-            <div>
-              <JobLinks job={sample} />
-            </div>
-            <LogViewer job={sample} />
-          </li>
-        ))}
+            <li key={sample.id}>
+              <JobSummary
+                job={sample}
+                highlight={
+                  sample.branch ? highlighted.has(sample.branch) : false
+                }
+              />
+              <div>
+                <JobLinks job={sample} />
+              </div>
+              <LogViewer job={sample} />
+            </li>
+          ))}
       </ul>
     </div>
   );

@@ -19,8 +19,8 @@ function NavBar() {
               </Link>
             </li>
             <li>
-              <Link prefetch={false} href="/hud/pytorch/pytorch/master">
-                Master
+              <Link prefetch={false} href="/hud/pytorch/pytorch/main">
+                Main
               </Link>
             </li>
             <li>
@@ -75,13 +75,24 @@ function NavBar() {
               </Link>
             </li>
             <li>
+              <Link prefetch={false} href="/nightlies">
+                Nightly
+              </Link>
+            </li>
+            <li>
               <Link prefetch={false} href="/reliability">
                 Failures Metric
               </Link>
             </li>
+            {/* uncomment after some eyeballs are on this */}
+            {/* <li>
+              <Link prefetch={false} href="/testing_overhead">
+                Testing Overhead
+              </Link>
+            </li> */}
             <li>
-              <Link prefetch={false} href="/failedjobs/pytorch/pytorch/master">
-                Failures Classfier
+              <Link prefetch={false} href="/failedjobs/pytorch/pytorch/main">
+                Failures Classifier
               </Link>
             </li>
             <li>

@@ -732,6 +732,18 @@ export class Metrics {
     this.addEntry(`aws.ec2.perRegion.runInstances.wallclock`, ms, dimensions);
   }
 
+  /* istanbul ignore next */
+  ec2RunInstancesAWSCallException(instanceType: string, awsRegion: string, exceptionName: string, count = 1) {
+    this.countEntry('aws.ec2.runInstances.exception', count);
+    this.countEntry(`aws.ec2.perRegion.runInstances.exception`, count, new Map([['Region', awsRegion]]));
+    this.countEntry(
+      `aws.ec2.perInstancesType.runInstances.exception`,
+      count,
+      new Map([['InstanceType', instanceType]]),
+    );
+    this.countEntry(`aws.ec2.perException.runInstances.exception`, count, new Map([['Exception', exceptionName]]));
+  }
+
   // RUN
   /* istanbul ignore next */
   getRunnerTypesSuccess() {
@@ -767,6 +779,11 @@ export class ScaleUpMetrics extends Metrics {
   /* istanbul ignore next */
   scaleUpSuccess() {
     this.countEntry('run.scaleup.success');
+  }
+
+  /* istanbul ignore next */
+  stochasticOvershoot() {
+    this.countEntry('run.scaleup.stochasticOvershoot');
   }
 
   /* istanbul ignore next */
@@ -1202,6 +1219,42 @@ export class ScaleDownMetrics extends Metrics {
       this.countEntry('run.ghRunner.perRunnerType.total', 1, dimensions);
       this.countEntry('run.ghRunner.perRunnerType.terminate.notfound', 1, dimensions);
     }
+  }
+
+  /* istanbul ignore next */
+  runnerGhOfflineFoundRepo(repo: Repo, total: number) {
+    const dimensions = this.getRepoDim(repo);
+    this.addEntry('run.ghRunner.perRepo.offline.found', total, dimensions);
+  }
+
+  /* istanbul ignore next */
+  runnerGhOfflineRemovedRepo(repo: Repo) {
+    const dimensions = this.getRepoDim(repo);
+    this.countEntry('run.ghRunner.perRepo.offline.removed.success', 1, dimensions);
+  }
+
+  /* istanbul ignore next */
+  runnerGhOfflineRemovedFailureRepo(repo: Repo) {
+    const dimensions = this.getRepoDim(repo);
+    this.countEntry('run.ghRunner.perRepo.offline.removed.failure', 1, dimensions);
+  }
+
+  /* istanbul ignore next */
+  runnerGhOfflineFoundOrg(org: string, total: number) {
+    const dimensions = new Map([['Org', org]]);
+    this.addEntry('run.ghRunner.perOrg.offline.found', total, dimensions);
+  }
+
+  /* istanbul ignore next */
+  runnerGhOfflineRemovedOrg(org: string) {
+    const dimensions = new Map([['Org', org]]);
+    this.countEntry('run.ghRunner.perOrg.offline.removed.success', 1, dimensions);
+  }
+
+  /* istanbul ignore next */
+  runnerGhOfflineRemovedFailureOrg(org: string) {
+    const dimensions = new Map([['Org', org]]);
+    this.countEntry('run.ghRunner.perOrg.offline.removed.failure', 1, dimensions);
   }
 
   /* istanbul ignore next */

@@ -1,7 +1,7 @@
 WITH performance_results AS (
   SELECT
     name,
-    speedup,
+    IF(speedup = 'infra_error', NULL, speedup) AS speedup, -- Handle the recent burst of infra error
     REPLACE(
       filename,
       CONCAT(
@@ -11,7 +11,9 @@ WITH performance_results AS (
     ) AS filename,
     compilation_latency,
     compression_ratio,
-    workflow_id,    
+    abs_latency,
+    workflow_id,
+    CAST(job_id AS INT) AS job_id,
   FROM
     inductor.torch_dynamo_perf_stats
   WHERE
@@ -36,6 +38,7 @@ accuracy_results AS (
       )
     ) AS filename,
     workflow_id,
+    CAST(job_id AS INT) AS job_id,
   FROM
     inductor.torch_dynamo_perf_stats
   WHERE
@@ -51,6 +54,7 @@ accuracy_results AS (
 results AS (
   SELECT
     accuracy_results.workflow_id AS workflow_id,
+    accuracy_results.job_id AS job_id,
     CASE
       WHEN accuracy_results.filename LIKE '%_torchbench' THEN 'torchbench'
       WHEN accuracy_results.filename LIKE '%_timm_models' THEN 'timm_models'
@@ -70,19 +74,23 @@ results AS (
       ELSE NULL
     END AS compiler,
     accuracy_results.name,
-    CAST(IF(
-      speedup IS NULL, '0.0000',
-      speedup
-    ) AS FLOAT) AS speedup,
+    IF(TRY_CAST(speedup AS FLOAT) IS NOT NULL,
+      CAST(speedup AS FLOAT),
+      0.0
+    ) AS speedup,
     accuracy,
-    CAST(IF(
-      compilation_latency IS NULL, '0.0000',
-      compilation_latency
-    ) AS FLOAT) AS compilation_latency,
-    CAST(IF(
-      compression_ratio IS NULL, '0.0000',
-      compression_ratio
-    ) AS FLOAT) AS compression_ratio,
+    IF(TRY_CAST(compilation_latency AS FLOAT) IS NOT NULL,
+      CAST(compilation_latency AS FLOAT),
+      0.0
+    ) AS compilation_latency,
+    IF(TRY_CAST(compression_ratio AS FLOAT) IS NOT NULL,
+      CAST(compression_ratio AS FLOAT),
+      0.0
+    ) AS compression_ratio,
+    IF(TRY_CAST(abs_latency AS FLOAT) IS NOT NULL,
+      CAST(abs_latency AS FLOAT),
+      0.0
+    ) AS abs_latency,
   FROM
     accuracy_results
     LEFT JOIN performance_results ON performance_results.name = accuracy_results.name
@@ -91,6 +99,8 @@ results AS (
 )
 SELECT DISTINCT
   results.workflow_id,
+  -- As the JSON response is pretty big, only return the field if it's needed
+  IF(:getJobId, results.job_id, NULL) AS job_id,
   results.suite,
   results.compiler,
   results.name,
@@ -98,6 +108,7 @@ SELECT DISTINCT
   results.accuracy,
   results.compilation_latency,
   results.compression_ratio,
+  results.abs_latency,
   FORMAT_ISO8601(
     DATE_TRUNC(: granularity, w._event_time)
   ) AS granularity_bucket,
@@ -106,7 +117,7 @@ FROM
 WHERE
   ARRAY_CONTAINS(SPLIT(:suites, ','), LOWER(results.suite))
   AND (ARRAY_CONTAINS(SPLIT(:compilers, ','), LOWER(results.compiler)) OR :compilers = '')
-  AND head_branch LIKE :branch
+  AND (ARRAY_CONTAINS(SPLIT(:branches, ','), head_branch) OR :branches = '')
   AND (ARRAY_CONTAINS(SPLIT(:commits, ','), head_sha) OR :commits = '')  
 ORDER BY
   granularity_bucket DESC,

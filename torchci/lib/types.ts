@@ -58,6 +58,7 @@ export interface RowData extends CommitData {
   jobs: JobData[];
   groupedJobs?: Map<string, GroupData>;
   isForcedMerge: boolean | false;
+  isForcedMergeWithFailures: boolean | false;
   nameToJobs?: Map<string, JobData>;
 }
 
@@ -73,6 +74,7 @@ export interface IssueData {
   state: "open" | "closed";
   body: string;
   updated_at: string;
+  author_association: string;
 }
 
 export interface HudParams {
@@ -147,6 +149,7 @@ export interface JobsPerCommitData {
 }
 
 export interface CompilerPerformanceData {
+  abs_latency: number;
   accuracy: string;
   compilation_latency: number;
   compiler: string;
@@ -156,6 +159,7 @@ export interface CompilerPerformanceData {
   speedup: number;
   suite: string;
   workflow_id: number;
+  job_id?: number;
 }
 
 export enum JobAnnotation {

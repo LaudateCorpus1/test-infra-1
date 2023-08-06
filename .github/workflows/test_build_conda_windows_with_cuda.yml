@@ -25,19 +25,21 @@ jobs:
       matrix:
         include:
           - repository: pytorch/audio
+            cache-path: /third_party/ffmpeg
+            cache-key: windows-ffmpeg
             pre-script: packaging/ffmpeg/build.bat
-            env-script: ""
-            wheel-build-params: "--plat-name win_amd64"
             post-script: ""
-            smoke-test-script: ""
-            package-name: torchaudio
+            smoke-test-script: test/smoke_test/smoke_test.py
             conda-package-directory: packaging/torchaudio
-          # - repository: pytorch/vision
-          #   pre-script: packaging/pre_build_script.sh
-          #   env-script: packaging/windows/internal/vc_env_helper.bat
-          #   post-script: packaging/post_build_script.sh
-          #   smoke-test-script: test/smoke_test.py
-          #   package-name: torchvision
+            package-name: torchaudio
+          - repository: pytorch/vision
+            pre-script: packaging/pre_build_script.sh
+            env-script: packaging/windows/internal/vc_env_helper.bat
+            post-script: ""
+            smoke-test-script: test/smoke_test.py
+            package-name: torchvision
+            cache-path: ""
+            cache-key: ""
     uses: ./.github/workflows/build_conda_windows.yml
     name: ${{ matrix.repository }}
     with:
@@ -47,7 +49,10 @@ jobs:
       test-infra-repository: ${{ github.repository }}
       test-infra-ref: ${{ github.ref }}
       build-matrix: ${{ needs.generate-matrix.outputs.matrix }}
+      smoke-test-script: ${{ matrix.smoke-test-script }}
       pre-script: ${{ matrix.pre-script }}
       post-script: ${{ matrix.post-script }}
       package-name: ${{ matrix.package-name }}
       trigger-event: "${{ github.event_name }}"
+      cache-path: ${{ matrix.cache-path }}
+      cache-key: ${{ matrix.cache-key }}

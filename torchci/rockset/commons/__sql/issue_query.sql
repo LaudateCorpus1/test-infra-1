@@ -5,8 +5,9 @@ SELECT
     issue.state,
     issue.body,
     issue.updated_at,
-from
-    issues as issue
-    cross join UNNEST(issue.labels as label) as labels
-where
-    labels.label.name = :label
+    issue.author_association,
+FROM
+    issues AS issue
+    CROSS JOIN UNNEST(issue.labels AS label) AS labels
+WHERE
+    labels.label.name =: label
